@@ -15,20 +15,23 @@ export interface CertificateElement {
 interface CertificateEditorState {
   backgroundImage: string | null;
   elements: CertificateElement[];
-  draggingId: string | null; // <--- DITAMBAHKAN (Penting untuk ElementForm)
+  draggingId: string | null;
+  canvasSize: { width: number; height: number }; // <-- BARU: Simpan ukuran asli
 
   setBackgroundImage: (url: string | null) => void;
   setElements: (elements: CertificateElement[]) => void;
   addElement: (element: CertificateElement) => void;
   updateElement: (id: string, data: Partial<CertificateElement>) => void;
-  setDraggingId: (id: string | null) => void; // <--- DITAMBAHKAN
+  setDraggingId: (id: string | null) => void;
+  setCanvasSize: (width: number, height: number) => void; // <-- BARU
   reset: () => void;
 }
 
 export const useCertificateEditor = create<CertificateEditorState>((set) => ({
   backgroundImage: null,
   elements: [],
-  draggingId: null, // Default null
+  draggingId: null,
+  canvasSize: { width: 800, height: 600 }, // Default fallback
 
   setBackgroundImage: (url) => set({ backgroundImage: url }),
   setElements: (elements) => set({ elements }),
@@ -46,11 +49,13 @@ export const useCertificateEditor = create<CertificateEditorState>((set) => ({
     })),
 
   setDraggingId: (id) => set({ draggingId: id }),
+  setCanvasSize: (width, height) => set({ canvasSize: { width, height } }),
 
   reset: () =>
     set({
       backgroundImage: null,
       elements: [],
       draggingId: null,
+      canvasSize: { width: 800, height: 600 },
     }),
 }));
