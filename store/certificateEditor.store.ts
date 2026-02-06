@@ -9,6 +9,7 @@ export interface CertificateElement {
   fontFamily: string;
   fontWeight: string; // "normal" | "bold"
   fontStyle: string;  // "normal" | "italic"
+  underline: boolean;
   color: string;
 }
 
@@ -16,14 +17,15 @@ interface CertificateEditorState {
   backgroundImage: string | null;
   elements: CertificateElement[];
   draggingId: string | null;
-  canvasSize: { width: number; height: number }; // <-- BARU: Simpan ukuran asli
+  canvasSize: { width: number; height: number };
 
   setBackgroundImage: (url: string | null) => void;
   setElements: (elements: CertificateElement[]) => void;
   addElement: (element: CertificateElement) => void;
   updateElement: (id: string, data: Partial<CertificateElement>) => void;
+  removeElement: (id: string) => void; // <-- TAMBAHAN
   setDraggingId: (id: string | null) => void;
-  setCanvasSize: (width: number, height: number) => void; // <-- BARU
+  setCanvasSize: (width: number, height: number) => void;
   reset: () => void;
 }
 
@@ -31,11 +33,12 @@ export const useCertificateEditor = create<CertificateEditorState>((set) => ({
   backgroundImage: null,
   elements: [],
   draggingId: null,
-  canvasSize: { width: 800, height: 600 }, // Default fallback
+  canvasSize: { width: 800, height: 600 },
 
   setBackgroundImage: (url) => set({ backgroundImage: url }),
+
   setElements: (elements) => set({ elements }),
-  
+
   addElement: (element) =>
     set((state) => ({
       elements: [...state.elements, element],
@@ -48,7 +51,17 @@ export const useCertificateEditor = create<CertificateEditorState>((set) => ({
       ),
     })),
 
+  // =========================
+  // DELETE ELEMENT
+  // =========================
+  removeElement: (id) =>
+    set((state) => ({
+      elements: state.elements.filter((el) => el.id !== id),
+      draggingId: state.draggingId === id ? null : state.draggingId,
+    })),
+
   setDraggingId: (id) => set({ draggingId: id }),
+
   setCanvasSize: (width, height) => set({ canvasSize: { width, height } }),
 
   reset: () =>

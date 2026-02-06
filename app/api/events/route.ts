@@ -10,8 +10,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const body = await req.json();
-
-  // ambil admin
+  
   const [admin] = await db
     .select({ id: users.id })
     .from(users)
@@ -37,6 +36,19 @@ export async function POST(req: Request) {
 
   return Response.json(event);
 }
+
+export async function PUT(req: Request) {
+  const { id, title, description, date } = await req.json();
+
+  const [event] = await db
+    .update(events)
+    .set({ title, description, date })
+    .where(eq(events.id, id))
+    .returning();
+
+  return Response.json(event);
+}
+
 
 export async function DELETE(req: Request) {
   const { id } = await req.json();

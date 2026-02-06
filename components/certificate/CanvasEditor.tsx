@@ -2,6 +2,8 @@
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useCertificateEditor, CertificateElement } from "@/store/certificateEditor.store";
+import { loadFont } from "@/utils/loadFont";
+
 
 export default function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -12,44 +14,44 @@ export default function Preview() {
     updateElement, 
     draggingId, 
     setDraggingId,
-    setCanvasSize // Ambil fungsi ini
+    setCanvasSize 
   } = useCertificateEditor();
 
   const [isDragging, setIsDragging] = useState(false); 
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [loadedBgImage, setLoadedBgImage] = useState<HTMLImageElement | null>(null);
 
-  // 1. Load Image & Set Dimensi Canvas
   useEffect(() => {
     if (!backgroundImage) {
-        // Default A4 Landscape jika belum ada gambar (approx 72 DPI)
         setCanvasSize(842, 595); 
         return;
     }
 
     const img = new Image();
     img.src = backgroundImage;
-    img.crossOrigin = "anonymous"; // Penting untuk export nanti
+    img.crossOrigin = "anonymous";
     
     img.onload = () => {
       setLoadedBgImage(img);
-      // Set ukuran canvas internal SAMA PERSIS dengan resolusi gambar asli
       setCanvasSize(img.width, img.height);
     };
-  }, [backgroundImage, setCanvasSize]);
 
-  // 2. Render Canvas Loop
+    elements.forEach(el => {
+      if (el.fontFamily) {
+        loadFont(el.fontFamily);
+      }
+    });
+  }, [backgroundImage, setCanvasSize, elements]);
+
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Tentukan ukuran internal canvas (Resolusi Tinggi)
     const width = loadedBgImage ? loadedBgImage.width : 842;
     const height = loadedBgImage ? loadedBgImage.height : 595;
 
-    // Pastikan atribut width/height HTML canvas sesuai resolusi asli
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
@@ -57,11 +59,9 @@ export default function Preview() {
 
     ctx.clearRect(0, 0, width, height);
 
-    // A. Gambar Background
     if (loadedBgImage) {
       ctx.drawImage(loadedBgImage, 0, 0, width, height);
     } else {
-      // Placeholder putih jika belum ada gambar
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, width, height);
       ctx.strokeStyle = "#e5e7eb";
@@ -81,6 +81,19 @@ export default function Preview() {
       ctx.shadowColor = "rgba(0,0,0,0.3)";
       ctx.shadowBlur = 4;
       ctx.fillText(el.text, el.x, el.y);
+      if (el.underline) {
+        const metrics = ctx.measureText(el.text);
+        const textWidth = metrics.width;
+
+        const underlineY = el.y + el.fontSize / 2 + 2;
+
+        ctx.beginPath();
+        ctx.moveTo(el.x - textWidth / 2, underlineY);
+        ctx.lineTo(el.x + textWidth / 2, underlineY);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = el.color;
+        ctx.stroke();
+      }
       ctx.restore();
 
       // C. Render Selection Box (Hanya jika elemen ini sedang dipilih)

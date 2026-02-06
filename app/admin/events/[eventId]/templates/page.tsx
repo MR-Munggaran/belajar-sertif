@@ -11,7 +11,7 @@ const generateId = (prefix: string) => `${prefix}_${Math.random().toString(36).s
 export default function TemplatesPage() {
   const params = useParams();
   const eventId = params.eventId as string;
-  const fileInputRef = useRef<HTMLInputElement>(null); // <--- Ref untuk input file
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const {
     elements,
@@ -59,7 +59,6 @@ export default function TemplatesPage() {
   const triggerFileInput = () => {
     fileInputRef.current?.click();
   };
-  // ------------------------------------
 
   const saveTemplate = async () => {
     try {
@@ -76,7 +75,7 @@ export default function TemplatesPage() {
     }
   };
 
-  const addElement = (type: "nomor" | "tanggal" | "mentor" | "text") => {
+  const addElement = (type: "nomor" | "tanggal" | "mentor" | "text" | "name") => {
     const centerX = canvasSize.width / 2;
     const centerY = canvasSize.height / 2;
     const autoFontSize = Math.max(20, Math.floor(canvasSize.width * 0.03)); 
@@ -91,10 +90,16 @@ export default function TemplatesPage() {
       fontFamily: "Arial",
       fontWeight: "normal",
       fontStyle: "normal",
+      underline: false,
       color: "#000000",
     };
 
     switch (type) {
+      case "name":
+        baseElement.text = "Input Your Name";
+        baseElement.fontSize = Math.floor(autoFontSize * 0.8);
+        baseElement.y = centerY - (autoFontSize * 3);
+        break;
       case "nomor":
         baseElement.text = "No. 123/SERTIF/2026";
         baseElement.fontSize = Math.floor(autoFontSize * 0.8);
@@ -153,6 +158,9 @@ export default function TemplatesPage() {
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
           <h3 className="font-bold mb-3 text-gray-800 text-xs uppercase tracking-wide">Add Components</h3>
           <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => addElement("name")} className="p-2 text-xs bg-gray-50 hover:bg-blue-50 hover:text-blue-600 border rounded transition text-left">
+             🔤 Name
+            </button>
             <button onClick={() => addElement("nomor")} className="p-2 text-xs bg-gray-50 hover:bg-blue-50 hover:text-blue-600 border rounded transition text-left">
               🔢 No. Sertifikat
             </button>
@@ -169,7 +177,7 @@ export default function TemplatesPage() {
         </div>
 
         {/* Panel Edit */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-grow">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grow">
            <ElementForm />
         </div>
 
