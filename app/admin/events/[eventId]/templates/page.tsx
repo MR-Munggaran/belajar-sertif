@@ -2,8 +2,9 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import Preview from "../../../../../components/certificate/Preview"; 
-import ElementForm from "../../../../../components/certificate/ElementForm"; 
+// PERBAIKAN 1: Import CanvasEditor (bukan Preview)
+import CanvasEditor from "@/components/certificate/CanvasEditor"; 
+import ElementForm from "@/components/certificate/ElementForm"; 
 import { useCertificateEditor, CertificateElement } from "@/store/certificateEditor.store";
 
 const generateId = (prefix: string) => `${prefix}_${Math.random().toString(36).substr(2, 9)}`;
@@ -21,8 +22,10 @@ export default function TemplatesPage() {
     setElements,
     addElement: addToStore,
     canvasSize,
+    setCanvasSize, 
   } = useCertificateEditor();
 
+  // Load Template Awal
   useEffect(() => {
     fetch(`/api/certificate-templates?eventId=${eventId}`)
       .then(res => res.json())
@@ -35,11 +38,10 @@ export default function TemplatesPage() {
       });
   }, [eventId, setBackgroundImage, setElements]);
 
-
+  // Handle Upload Background
   const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Validasi tipe file
       if (!file.type.startsWith("image/")) {
         alert("Harap upload file gambar (JPG/PNG).");
         return;
@@ -48,8 +50,15 @@ export default function TemplatesPage() {
       const reader = new FileReader();
       reader.onload = (ev) => {
         if (ev.target?.result) {
-          // Set hasil bacaan (Base64) ke store sebagai background
-          setBackgroundImage(ev.target.result as string);
+          const result = ev.target.result as string;
+          setBackgroundImage(result);
+
+          // PERBAIKAN 3: Update ukuran canvas di store agar posisi elemen baru akurat
+          const img = new Image();
+          img.src = result;
+          img.onload = () => {
+             setCanvasSize( img.width, img.height);
+          };
         }
       };
       reader.readAsDataURL(file);
@@ -80,11 +89,14 @@ export default function TemplatesPage() {
     }
   };
 
-
   const addElement = (type: "nomor" | "tanggal" | "mentor" | "text" | "name") => {
-    const centerX = canvasSize.width / 2;
-    const centerY = canvasSize.height / 2;
-    const autoFontSize = Math.max(20, Math.floor(canvasSize.width * 0.03)); 
+    // Default fallback jika canvasSize 0 (belum ada gambar)
+    const currentWidth = canvasSize.width || 842;
+    const currentHeight = canvasSize.height || 595;
+
+    const centerX = currentWidth / 2;
+    const centerY = currentHeight / 2;
+    const autoFontSize = Math.max(20, Math.floor(currentWidth * 0.03)); 
     const stackOffset = elements.length * 20;
 
     const baseElement: CertificateElement = {
@@ -98,32 +110,37 @@ export default function TemplatesPage() {
       fontStyle: "normal",
       underline: false,
       color: "#000000",
-      type: "field",
+      type: "static",
     };
 
     switch (type) {
       case "name":
-        baseElement.text = "Input Your Name";
-        baseElement.fontSize = Math.floor(autoFontSize * 0.8);
+        baseElement.type = "field"; 
+        baseElement.field = "participant.name"; 
+        baseElement.text = "{Nama Peserta}"; 
+        baseElement.fontSize = Math.floor(autoFontSize * 1.5);
         baseElement.y = centerY - (autoFontSize * 3);
         break;
+      
       case "nomor":
-        baseElement.text = "No. 123/SERTIF/2026";
+        baseElement.type = "field";
+        baseElement.field = "certificate.number";
+        baseElement.text = "No. {123/SERTIF/2026}";
         baseElement.fontSize = Math.floor(autoFontSize * 0.8);
-        baseElement.y = centerY - (autoFontSize * 3);
+        baseElement.y = centerY - (autoFontSize * 4);
         break;
+        
       case "tanggal":
         baseElement.text = "Jakarta, 04 Februari 2026";
-        baseElement.fontSize = Math.floor(autoFontSize * 0.7);
-        baseElement.y = canvasSize.height * 0.8; 
         break;
+        
       case "mentor":
         baseElement.text = "Nama Mentor";
         baseElement.fontWeight = "bold";
-        baseElement.y = canvasSize.height * 0.75;
         break;
+        
       default: 
-        baseElement.text = "Teks Baru";
+        baseElement.text = "Teks Tambahan";
         break;
     }
     addToStore(baseElement);
@@ -133,7 +150,8 @@ export default function TemplatesPage() {
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 h-screen max-h-screen">
       {/* Kolom Kiri: Canvas Preview */}
       <div className="lg:col-span-9 bg-gray-200 rounded-xl flex items-center justify-center p-4 border shadow-inner overflow-hidden relative">
-         <Preview />
+         {/* PERBAIKAN 4: Panggil Component CanvasEditor */}
+         <CanvasEditor />
       </div>
 
       {/* Kolom Kanan: Tools */}
@@ -143,7 +161,6 @@ export default function TemplatesPage() {
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
            <h3 className="font-bold mb-3 text-gray-800 text-xs uppercase tracking-wide">Background</h3>
            
-           {/* Hidden Input File */}
            <input 
              type="file" 
              accept="image/*" 

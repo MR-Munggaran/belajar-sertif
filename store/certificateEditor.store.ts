@@ -8,7 +8,6 @@ export interface CertificateElement {
     | "participant.email"
     | "certificate.number"
     | "certificate.date"
-    | "event.name";
   text?: string;
   x: number;
   y: number;
