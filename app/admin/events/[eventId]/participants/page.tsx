@@ -4,41 +4,64 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
 type Participant = {
+  certificateId?: string | null;
   id: string;
   name: string;
   email: string;
 };
 
 export default function ParticipantsPage() {
-  const params = useParams();
-  const eventId = params.eventId as string;
+  const { eventId } = useParams<{ eventId: string }>();
 
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
 
   const loadParticipants = async () => {
-    const r = await fetch(`/api/participants?eventId=${eventId}`);
-    const data = await r.json();
-    setParticipants(data);
+    const res = await fetch(`/api/participants?eventId=${eventId}`);
+    if (!res.ok) return;
+    setParticipants(await res.json());
   };
 
-    useEffect(() => {
-    const fetchData = async () => {
-        const r = await fetch(`/api/participants?eventId=${eventId}`);
-        const data = await r.json();
-        setParticipants(data);
-    };
+  const downloadCertificate = (certificateId: string) => {
+    window.open(`/api/certificates/${certificateId}/download`, "_blank");
+  };
 
-    fetchData();
-    }, [eventId]);
+
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function fetchParticipants() {
+      const res = await fetch(`/api/participants?eventId=${eventId}`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      if (!ignore) {
+        setParticipants(data);
+      }
+    }
+
+    fetchParticipants();
+
+    return () => {
+      ignore = true;
+    };
+  }, [eventId]);
+
 
   const createParticipant = async () => {
-    await fetch("/api/participants", {
+    const res = await fetch("/api/participants", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ eventId, name, email }),
     });
+
+    if (!res.ok) {
+      alert("Gagal menambah participant");
+      return;
+    }
 
     setName("");
     setEmail("");
@@ -60,12 +83,44 @@ export default function ParticipantsPage() {
     form.append("file", file);
     form.append("eventId", eventId);
 
-    await fetch("/api/participants/upload", {
+    const res = await fetch("/api/participants/upload", {
       method: "POST",
       body: form,
     });
 
+    if (!res.ok) {
+      alert("Upload CSV gagal");
+      return;
+    }
+
     loadParticipants();
+  };
+
+  const generateCertificates = async () => {
+    if (selectedIds.length === 0) {
+      alert("Pilih participant terlebih dahulu");
+      return;
+    }
+
+    const res = await fetch("/api/certificates/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        eventId,
+        participantIds: selectedIds,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text(); // ⬅️ penting
+      console.error(text);
+      alert("Gagal generate sertifikat");
+      return;
+    }
+
+    const data = await res.json();
+    alert(`${data.total} sertifikat berhasil dibuat`);
+    setSelectedIds([]);
   };
 
   return (
@@ -96,39 +151,69 @@ export default function ParticipantsPage() {
         </button>
       </div>
 
-      {/* CSV UPLOAD */}
-      <div className="mb-6">
-        <input
-          type="file"
-          accept=".csv"
-          onChange={(e) => {
-            if (e.target.files?.[0]) {
-              uploadCSV(e.target.files[0]);
-            }
-          }}
-        />
-      </div>
+      {/* CSV */}
+      <input
+        type="file"
+        accept=".csv"
+        className="mb-6"
+        onChange={(e) => e.target.files && uploadCSV(e.target.files[0])}
+      />
+
+      {/* BULK GENERATE */}
+      <button
+        onClick={generateCertificates}
+        className="mb-4 bg-green-600 text-white px-4 py-2 rounded"
+      >
+        Generate Selected Certificates
+      </button>
 
       {/* LIST */}
       <div className="space-y-2">
         {participants.map((p) => (
           <div
             key={p.id}
-            className="flex justify-between bg-white p-3 rounded shadow"
+            className="flex justify-between items-center bg-white p-3 rounded shadow"
           >
-            <div>
+            <label className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(p.id)}
+                onChange={(e) =>
+                  setSelectedIds((prev) =>
+                    e.target.checked
+                      ? [...prev, p.id]
+                      : prev.filter((id) => id !== p.id)
+                  )
+                }
+              />
               {p.name} — {p.email}
-            </div>
+            </label>
 
-            <button
-              onClick={() => deleteParticipant(p.id)}
-              className="text-red-600"
-            >
-              Delete
-            </button>
+            <div className="flex gap-3">
+              {p.certificateId ? (
+                <button
+                  onClick={() => downloadCertificate(p.certificateId!)}
+                  className="text-blue-600"
+                >
+                  Download
+                </button>
+              ) : (
+                <span className="text-gray-400 text-sm">
+                  Belum ada sertifikat
+                </span>
+              )}
+
+              <button
+                onClick={() => deleteParticipant(p.id)}
+                className="text-red-600"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         ))}
       </div>
+
     </div>
   );
 }

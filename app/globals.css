@@ -132,3 +132,32 @@ canvas {
     @apply bg-background text-foreground;
   }
 }
+
+.element-wrapper {
+  position: absolute;
+  cursor: move;
+  transform-origin: center center;
+}
+
+.resize-handle {
+  width: 10px;
+  height: 10px;
+  background: white;
+  border: 1px solid #333;
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
+}
+
+.rotate-handle {
+  width: 10px;
+  height: 10px;
+  background: white;
+  border: 1px solid #333;
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  cursor: grab;
+}

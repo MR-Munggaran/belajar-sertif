@@ -7,28 +7,47 @@ export async function GET(req: Request) {
   const participantId = searchParams.get("participantId");
 
   if (!participantId) {
-    return Response.json({ error: "participantId required" }, { status: 400 });
+    return Response.json(
+      { error: "participantId required" },
+      { status: 400 }
+    );
   }
 
-  const data = await db
-    .select()
+  const [certificate] = await db
+    .select({
+      certificateId: certificates.id,
+    })
     .from(certificates)
-    .where(eq(certificates.participantId, participantId));
+    .where(eq(certificates.participantId, participantId))
+    .limit(1);
 
-  return Response.json(data);
+  return Response.json({
+    certificateId: certificate?.certificateId ?? null,
+  });
 }
+
 
 export async function POST(req: Request) {
   const body = await req.json();
+
+  if (!body.participantId || !body.templateId) {
+    return Response.json(
+      { error: "participantId & templateId required" },
+      { status: 400 }
+    );
+  }
 
   const [certificate] = await db
     .insert(certificates)
     .values({
       participantId: body.participantId,
       templateId: body.templateId,
-      fileUrl: body.fileUrl, // hasil PDF / image
+      fileUrl: body.fileUrl ?? null,
     })
-    .returning();
+    .returning({
+      id: certificates.id,
+      participantId: certificates.participantId,
+    });
 
   return Response.json(certificate);
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useRef } from "react"; // <--- Tambah useRef
+import { useEffect, useRef, useState } from "react";
 import Preview from "../../../../../components/certificate/Preview"; 
 import ElementForm from "../../../../../components/certificate/ElementForm"; 
 import { useCertificateEditor, CertificateElement } from "@/store/certificateEditor.store";
@@ -10,6 +10,7 @@ const generateId = (prefix: string) => `${prefix}_${Math.random().toString(36).s
 
 export default function TemplatesPage() {
   const params = useParams();
+  const [templateId, setTemplateId] = useState<string | null>(null);
   const eventId = params.eventId as string;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -22,20 +23,19 @@ export default function TemplatesPage() {
     canvasSize,
   } = useCertificateEditor();
 
-  // 1. Load Data Template
   useEffect(() => {
     fetch(`/api/certificate-templates?eventId=${eventId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && data.length > 0) {
+      .then(res => res.json())
+      .then(data => {
+        if (data?.length > 0) {
+          setTemplateId(data[0].id); 
           setElements(data[0].elements || []);
           setBackgroundImage(data[0].backgroundImage || null);
         }
-      })
-      .catch((err) => console.error("Gagal load template:", err));
+      });
   }, [eventId, setBackgroundImage, setElements]);
 
-  // --- LOGIC UPLOAD BACKGROUND BARU ---
+
   const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -61,19 +61,25 @@ export default function TemplatesPage() {
   };
 
   const saveTemplate = async () => {
-    try {
-      const res = await fetch("/api/certificate-templates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventId, backgroundImage, elements }),
-      });
-      if (res.ok) alert("Template berhasil disimpan!");
-      else alert("Gagal menyimpan template");
-    } catch (error) {
-      console.error(error);
-      alert("Terjadi kesalahan saat menyimpan");
+    const isUpdate = Boolean(templateId);
+
+    const res = await fetch("/api/certificate-templates", {
+      method: isUpdate ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        isUpdate
+          ? { id: templateId, backgroundImage, elements }
+          : { eventId, backgroundImage, elements }
+      ),
+    });
+
+    if (res.ok) {
+      alert(isUpdate ? "Template diperbarui!" : "Template dibuat!");
+    } else {
+      alert("Gagal menyimpan template");
     }
   };
+
 
   const addElement = (type: "nomor" | "tanggal" | "mentor" | "text" | "name") => {
     const centerX = canvasSize.width / 2;
@@ -84,14 +90,15 @@ export default function TemplatesPage() {
     const baseElement: CertificateElement = {
       id: generateId(type),
       text: "",
-      x: centerX, 
+      x: centerX,
       y: centerY + stackOffset,
-      fontSize: autoFontSize, 
+      fontSize: autoFontSize,
       fontFamily: "Arial",
       fontWeight: "normal",
       fontStyle: "normal",
       underline: false,
       color: "#000000",
+      type: "field",
     };
 
     switch (type) {

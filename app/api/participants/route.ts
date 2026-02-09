@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { participants } from "@/db/schema/participant";
 import { eq } from "drizzle-orm";
 
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const eventId = searchParams.get("eventId");

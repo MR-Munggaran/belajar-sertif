@@ -2,13 +2,23 @@ import { create } from "zustand";
 
 export interface CertificateElement {
   id: string;
-  text: string;
+  type: "static" | "field";
+  field?: 
+    | "participant.name"
+    | "participant.email"
+    | "certificate.number"
+    | "certificate.date"
+    | "event.name";
+  text?: string;
   x: number;
   y: number;
   fontSize: number;
+  rotation?: number;
+  width?: number;
+  height?: number;
   fontFamily: string;
-  fontWeight: string; // "normal" | "bold"
-  fontStyle: string;  // "normal" | "italic"
+  fontWeight: string;
+  fontStyle: string;
   underline: boolean;
   color: string;
 }
