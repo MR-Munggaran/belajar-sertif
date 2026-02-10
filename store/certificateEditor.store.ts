@@ -1,13 +1,11 @@
 import { create } from "zustand";
+import { PaperSize, Orientation, getCanvasDimensions } from "@/utils/paperSizes";
 
+// Gunakan interface Element yang sama
 export interface CertificateElement {
   id: string;
   type: "static" | "field";
-  field?: 
-    | "participant.name"
-    | "participant.email"
-    | "certificate.number"
-    | "certificate.date"
+  field?: "participant.name" | "participant.email" | "certificate.number" | "certificate.date";
   text?: string;
   x: number;
   y: number;
@@ -22,62 +20,139 @@ export interface CertificateElement {
   color: string;
 }
 
-interface CertificateEditorState {
-  backgroundImage: string | null;
+interface Page {
+  id: string;
   elements: CertificateElement[];
-  draggingId: string | null;
+  backgroundImage: string | null;
+}
+
+interface CertificateEditorState {
+  // Global Settings
+  paperSize: PaperSize;
+  orientation: Orientation;
   canvasSize: { width: number; height: number };
 
+  // Multi-page Data
+  pages: Page[];
+  activePageId: string;
+  draggingId: string | null;
+
+  // Actions
+  setPaperSize: (size: PaperSize) => void;
+  setOrientation: (orientation: Orientation) => void;
+  
+  // Page Management
+  addPage: () => void;
+  removePage: (id: string) => void;
+  setActivePage: (id: string) => void;
+
+  // Element & Background (Targeting Active Page)
   setBackgroundImage: (url: string | null) => void;
   setElements: (elements: CertificateElement[]) => void;
   addElement: (element: CertificateElement) => void;
   updateElement: (id: string, data: Partial<CertificateElement>) => void;
-  removeElement: (id: string) => void; // <-- TAMBAHAN
+  removeElement: (id: string) => void;
   setDraggingId: (id: string | null) => void;
-  setCanvasSize: (width: number, height: number) => void;
+  
   reset: () => void;
 }
 
-export const useCertificateEditor = create<CertificateEditorState>((set) => ({
-  backgroundImage: null,
-  elements: [],
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
+export const useCertificateEditor = create<CertificateEditorState>((set, get) => ({
+  paperSize: "A4",
+  orientation: "landscape",
+  canvasSize: getCanvasDimensions("A4", "landscape"), // Default A4 Landscape
+  
+  pages: [{ id: "page_1", elements: [], backgroundImage: null }], // Default 1 halaman
+  activePageId: "page_1",
   draggingId: null,
-  canvasSize: { width: 800, height: 600 },
 
-  setBackgroundImage: (url) => set({ backgroundImage: url }),
+  setPaperSize: (size) => {
+    const { orientation } = get();
+    set({ 
+      paperSize: size, 
+      canvasSize: getCanvasDimensions(size, orientation) 
+    });
+  },
 
-  setElements: (elements) => set({ elements }),
+  setOrientation: (orientation) => {
+    const { paperSize } = get();
+    set({ 
+      orientation, 
+      canvasSize: getCanvasDimensions(paperSize, orientation) 
+    });
+  },
 
-  addElement: (element) =>
-    set((state) => ({
-      elements: [...state.elements, element],
-    })),
+  addPage: () => set((state) => {
+    const newPageId = `page_${generateId()}`;
+    return {
+      pages: [...state.pages, { id: newPageId, elements: [], backgroundImage: null }],
+      activePageId: newPageId // Otomatis pindah ke page baru
+    };
+  }),
 
-  updateElement: (id, data) =>
-    set((state) => ({
-      elements: state.elements.map((el) =>
-        el.id === id ? { ...el, ...data } : el
-      ),
-    })),
+  removePage: (id) => set((state) => {
+    if (state.pages.length <= 1) return state; // Minimal 1 page
+    const newPages = state.pages.filter(p => p.id !== id);
+    return {
+      pages: newPages,
+      activePageId: state.activePageId === id ? newPages[0].id : state.activePageId
+    };
+  }),
 
-  // =========================
-  // DELETE ELEMENT
-  // =========================
-  removeElement: (id) =>
-    set((state) => ({
-      elements: state.elements.filter((el) => el.id !== id),
-      draggingId: state.draggingId === id ? null : state.draggingId,
-    })),
+  setActivePage: (id) => set({ activePageId: id, draggingId: null }),
+
+  // --- ACTIONS PER PAGE ---
+
+  setBackgroundImage: (url) => set((state) => ({
+    pages: state.pages.map(p => 
+      p.id === state.activePageId ? { ...p, backgroundImage: url } : p
+    )
+  })),
+
+  setElements: (elements) => set((state) => ({
+    pages: state.pages.map(p => 
+      p.id === state.activePageId ? { ...p, elements } : p
+    )
+  })),
+
+  addElement: (element) => set((state) => ({
+    pages: state.pages.map(p => 
+      p.id === state.activePageId 
+        ? { ...p, elements: [...p.elements, element] } 
+        : p
+    )
+  })),
+
+  updateElement: (elId, data) => set((state) => ({
+    pages: state.pages.map(p => 
+      p.id === state.activePageId 
+        ? {
+            ...p,
+            elements: p.elements.map(el => el.id === elId ? { ...el, ...data } : el)
+          }
+        : p
+    )
+  })),
+
+  removeElement: (elId) => set((state) => ({
+    pages: state.pages.map(p => 
+      p.id === state.activePageId 
+        ? { ...p, elements: p.elements.filter(el => el.id !== elId) }
+        : p
+    ),
+    draggingId: state.draggingId === elId ? null : state.draggingId
+  })),
 
   setDraggingId: (id) => set({ draggingId: id }),
 
-  setCanvasSize: (width, height) => set({ canvasSize: { width, height } }),
-
-  reset: () =>
-    set({
-      backgroundImage: null,
-      elements: [],
-      draggingId: null,
-      canvasSize: { width: 800, height: 600 },
-    }),
+  reset: () => set({
+    paperSize: "A4",
+    orientation: "landscape",
+    canvasSize: getCanvasDimensions("A4", "landscape"),
+    pages: [{ id: "page_1", elements: [], backgroundImage: null }],
+    activePageId: "page_1",
+    draggingId: null
+  })
 }));

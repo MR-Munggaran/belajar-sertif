@@ -9,15 +9,20 @@
     const [fontOpen, setFontOpen] = useState(false);
     const [fontSearch, setFontSearch] = useState("");
 
+    const activePageId = useCertificateEditor((state) => state.activePageId);
+    const pages = useCertificateEditor((state) => state.pages);
+
     
-    const elements = useCertificateEditor((state) => state.elements);
+    // const elements = useCertificateEditor((state) => state.elements);
     const updateElement = useCertificateEditor((state) => state.updateElement);
     const draggingId = useCertificateEditor((state) => state.draggingId);
     const removeElement = useCertificateEditor((state) => state.removeElement);
 
+    const activePage = pages.find(p => p.id === activePageId);
+    const activeElement = activePage?.elements.find((el) => el.id === draggingId);
+  
     const FONT_OPTIONS = useGoogleFonts();
 
-    const activeElement = elements.find((el) => el.id === draggingId);
 
     const filteredFonts = useMemo(() => {
       return FONT_OPTIONS.filter((f) =>
