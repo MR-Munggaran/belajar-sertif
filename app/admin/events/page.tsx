@@ -24,14 +24,20 @@ export default function EventsPage() {
   };
 
   useEffect(() => {
-    const fetchData = async () => {
+     const loadEvents = async () => {
       const r = await fetch("/api/events");
       const data = await r.json();
       setEvents(data);
     };
-
-    fetchData();
+    loadEvents()
   }, []);
+
+  const resetForm = () => {
+    setTitle("");
+    setDescription("");
+    setDate("");
+    setEditingId(null);
+  };
 
   const createEvent = async () => {
     await fetch("/api/events", {
@@ -40,9 +46,7 @@ export default function EventsPage() {
       body: JSON.stringify({ title, description, date }),
     });
 
-    setTitle("");
-    setDescription("");
-    setDate("");
+    resetForm();
     loadEvents();
   };
 
@@ -58,10 +62,7 @@ export default function EventsPage() {
       }),
     });
 
-    setEditingId(null);
-    setTitle("");
-    setDescription("");
-    setDate("");
+    resetForm();
     loadEvents();
   };
 
@@ -85,91 +86,123 @@ export default function EventsPage() {
   };
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold mb-6">Events</h1>
+    <div className="max-w-5xl mx-auto px-4 py-10 space-y-10">
+      {/* HEADER */}
+      <div>
+        <h1 className="text-3xl font-semibold text-slate-800">
+          Event Management
+        </h1>
+        <p className="text-slate-500 mt-1">
+          Create and manage your events
+        </p>
+      </div>
 
       {/* FORM */}
-      <div className="flex flex-col gap-2 mb-6 max-w-md">
-        <input
-          className="border p-2 rounded"
-          placeholder="Event name"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <h2 className="text-lg font-medium text-slate-700 mb-4">
+          {editingId ? "Edit Event" : "Create New Event"}
+        </h2>
 
-        <input
-          className="border p-2 rounded"
-          placeholder="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
+        <div className="grid gap-4 md:grid-cols-3">
+          <input
+            className="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            placeholder="Event title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
 
-        <input
-          type="date"
-          className="border p-2 rounded"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
+          <input
+            className="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            placeholder="Description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
 
-        {editingId ? (
-          <button
-            onClick={updateEvent}
-            className="bg-yellow-600 text-white px-4 py-2 rounded"
-          >
-            Update
-          </button>
-        ) : (
-          <button
-            onClick={createEvent}
-            className="bg-blue-600 text-white px-4 py-2 rounded"
-          >
-            Create
-          </button>
-        )}
+          <input
+            type="date"
+            className="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          {editingId ? (
+            <>
+              <button
+                onClick={updateEvent}
+                className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2 rounded-lg"
+              >
+                Update Event
+              </button>
+              <button
+                onClick={resetForm}
+                className="text-slate-600 hover:text-slate-800"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={createEvent}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
+            >
+              Create Event
+            </button>
+          )}
+        </div>
       </div>
 
       {/* LIST */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         {events.map((e) => (
           <div
             key={e.id}
-            className="bg-white p-4 rounded shadow flex justify-between items-center"
+            className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4"
           >
             <div>
-              <p className="font-semibold">{e.title}</p>
-              <p className="text-sm text-gray-500">{e.description}</p>
+              <p className="text-lg font-medium text-slate-800">
+                {e.title}
+              </p>
+              <p className="text-sm text-slate-500">
+                {e.description || "No description"}
+              </p>
+              {e.date && (
+                <p className="text-xs text-slate-400 mt-1">
+                  📅 {e.date}
+                </p>
+              )}
             </div>
 
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-4 text-sm">
               <Link
                 href={`/admin/events/${e.id}/participants`}
-                className="text-blue-600"
+                className="text-blue-600 hover:underline"
               >
                 Participants
               </Link>
 
               <Link
                 href={`/admin/events/${e.id}/templates`}
-                className="text-green-600"
+                className="text-emerald-600 hover:underline"
               >
                 Certificate
               </Link>
 
               <button
                 onClick={() => startEdit(e)}
-                className="text-yellow-600"
+                className="text-amber-600 hover:underline"
               >
                 Edit
               </button>
 
               <button
                 onClick={() => deleteEvent(e.id)}
-                className="text-red-600"
+                className="text-red-600 hover:underline"
               >
                 Delete
               </button>
             </div>
-
           </div>
         ))}
       </div>

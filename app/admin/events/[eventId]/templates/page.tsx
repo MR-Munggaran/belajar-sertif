@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import CanvasEditor from "@/components/certificate/CanvasEditor"; 
 import ElementForm from "@/components/certificate/ElementForm"; 
 import { useCertificateEditor, CertificateElement } from "@/store/certificateEditor.store";
-import { PaperSize, Orientation } from "@/utils/paperSizes"; // Pastikan file ini ada (lihat step 1 jawaban sebelumnya)
+import { PaperSize } from "@/utils/paperSizes"; // Pastikan file ini ada (lihat step 1 jawaban sebelumnya)
 
 const generateId = (prefix: string) => `${prefix}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -14,6 +14,7 @@ export default function TemplatesPage() {
   const [templateId, setTemplateId] = useState<string | null>(null);
   const eventId = params.eventId as string;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [backgroundFile, setBackgroundFile] = useState<File | null>(null);
 
   // 1. AMBIL STATE LENGKAP DARI STORE BARU
   const {
@@ -72,52 +73,71 @@ export default function TemplatesPage() {
       });
   }, [eventId, reset, setBackgroundImage, setElements, setPaperSize, setOrientation]);
 
-  // 3. HANDLE UPLOAD BACKGROUND (SIMPLIFIED)
-  const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (!file.type.startsWith("image/")) {
-        alert("Harap upload file gambar (JPG/PNG).");
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        if (ev.target?.result) {
-          // Cukup set image, ukuran canvas dikontrol oleh Paper Size (A4/A5)
-          setBackgroundImage(ev.target.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+// 3. HANDLE UPLOAD BACKGROUND
+const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (file) {
+    if (!file.type.startsWith("image/")) {
+      alert("Harap upload file gambar (JPG/PNG).");
+      return;
     }
-  };
 
-  // 4. SAVE TEMPLATE (UPDATED PAYLOAD)
-  const saveTemplate = async () => {
-    const isUpdate = Boolean(templateId);
+    // A. SIMPAN FILE MENTAH UNTUK DIKIRIM KE SERVER
+    setBackgroundFile(file);
 
-    // Kita kirim seluruh pages dan setting
-    const payload = {
-       eventId,
-       paperSize,
-       orientation,
-       pages: pages, // Array of pages
+    // B. SIMPAN PREVIEW UNTUK DITAMPILKAN DI CANVAS
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      if (ev.target?.result) {
+        setBackgroundImage(ev.target.result as string);
+      }
     };
-    
-    if (isUpdate) Object.assign(payload, { id: templateId });
+    reader.readAsDataURL(file);
+  }
+};
 
+// 4. SAVE TEMPLATE (FIXED)
+const saveTemplate = async () => {
+  const isUpdate = Boolean(templateId);
+
+  // A. GUNAKAN FORM DATA
+  const formData = new FormData();
+
+  // Masukkan data dasar
+  formData.append("eventId", eventId);
+  
+  if (isUpdate && templateId) {
+    formData.append("id", templateId);
+  }
+
+  // Masukkan File Gambar (Hanya jika ada file baru yang diupload)
+  if (backgroundFile) {
+    formData.append("backgroundImage", backgroundFile);
+  }
+  formData.append("elements", JSON.stringify(pages)); 
+
+  try {
     const res = await fetch("/api/certificate-templates", {
       method: isUpdate ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      // PENTING: JANGAN SET 'Content-Type': 'application/json'
+      // Browser akan otomatis set 'multipart/form-data; boundary=...'
+      body: formData,
     });
 
     if (res.ok) {
+      const result = await res.json();
       alert(isUpdate ? "Template diperbarui!" : "Template dibuat!");
+      // Reset file state agar tidak terkirim lagi jika save ulang tanpa ganti bg
+      setBackgroundFile(null); 
     } else {
-      alert("Gagal menyimpan template");
+      const err = await res.json();
+      alert(`Gagal menyimpan template: ${err.error}`);
     }
-  };
+  } catch (error) {
+    console.error("Save error:", error);
+    alert("Terjadi kesalahan koneksi");
+  }
+};
 
   // 5. ADD ELEMENT (DYNAMIC CENTER)
   const addElement = (type: "nomor" | "tanggal" | "mentor" | "text" | "name") => {
