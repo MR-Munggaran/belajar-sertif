@@ -110,28 +110,6 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
   const initialElState = useRef<DragState>({
     x: 0, y: 0, fontSize: 0, rotation: 0
   });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;

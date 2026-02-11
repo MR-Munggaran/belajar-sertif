@@ -36,42 +36,49 @@ export default function TemplatesPage() {
     
     // Actions untuk Page Aktif
     setBackgroundImage,
-    setElements,
+    loadTemplate,
     addElement: addToStore,
     reset
   } = useCertificateEditor();
 
-  // 2. LOAD TEMPLATE (Adaptasi ke struktur data baru)
+// 2. LOAD TEMPLATE
   useEffect(() => {
-    // Reset store saat pertama kali masuk
+    // 1. Reset store agar canvas bersih saat berpindah event/halaman
     reset();
 
-    fetch(`/api/certificate-templates?eventId=${eventId}`)
-      .then(res => res.json())
-      .then(data => {
-        if (data?.length > 0) {
-          const template = data[0];
-          setTemplateId(template.id);
+    // 2. Fetch data
+    const fetchTemplate = async () => {
+      try {
+        const res = await fetch(`/api/certificate-templates?eventId=${eventId}`);
+        const data = await res.json();
+
+        if (data && data.length > 0) {
+          const template = data[0]; // Ambil template pertama
           
-          // Jika data dari backend sudah support multi-page
-          if (template.pages && Array.isArray(template.pages)) {
-             // Kita butuh action 'setAllPages' di store idealnya, 
-             // tapi disini kita simulasi load page 1 dulu manual
-             // (Untuk implementasi full, update store agar punya method `loadTemplate(data)`)
-             const firstPage = template.pages[0];
-             setElements(firstPage.elements);
-             setBackgroundImage(firstPage.backgroundImage);
-             if (template.paperSize) setPaperSize(template.paperSize);
-             if (template.orientation) setOrientation(template.orientation);
-          } 
-          // Fallback untuk data legacy (single page)
-          else {
-             setElements(template.elements || []);
-             setBackgroundImage(template.backgroundImage || null);
-          }
+          // Simpan ID untuk keperluan update nanti
+          setTemplateId(template.id);
+
+          // 3. Masukkan data ke Store menggunakan action 'loadTemplate' yang baru
+          // Ini otomatis mengupdate page yang aktif
+          loadTemplate({
+            backgroundImage: template.backgroundImage || "",
+            elements: (template.elements as CertificateElement[]) || [],
+          });
+
+          // 4. (Opsional) Jika nanti di DB Anda menyimpan ukuran kertas
+          // Saat ini schema DB belum ada kolom paperSize/orientation, 
+          // tapi jika API mengirimnya, kita set:
+          if (template.paperSize) setPaperSize(template.paperSize);
+          if (template.orientation) setOrientation(template.orientation);
         }
-      });
-  }, [eventId, reset, setBackgroundImage, setElements, setPaperSize, setOrientation]);
+      } catch (error) {
+        console.error("Gagal memuat template:", error);
+      }
+    };
+
+    fetchTemplate();
+
+  }, [eventId, reset, loadTemplate, setPaperSize, setOrientation]);
 
 // 3. HANDLE UPLOAD BACKGROUND
 const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,48 +103,41 @@ const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
   }
 };
 
-// 4. SAVE TEMPLATE (FIXED)
-const saveTemplate = async () => {
-  const isUpdate = Boolean(templateId);
+  // 4. SAVE TEMPLATE (FIXED)
+  const saveTemplate = async () => {
+    const isUpdate = Boolean(templateId);
 
-  // A. GUNAKAN FORM DATA
-  const formData = new FormData();
+    const formData = new FormData();
+    formData.append("eventId", eventId);
 
-  // Masukkan data dasar
-  formData.append("eventId", eventId);
-  
-  if (isUpdate && templateId) {
-    formData.append("id", templateId);
-  }
+    if (isUpdate && templateId) {
+      formData.append("id", templateId);
+    }
 
-  // Masukkan File Gambar (Hanya jika ada file baru yang diupload)
-  if (backgroundFile) {
-    formData.append("backgroundImage", backgroundFile);
-  }
-  formData.append("elements", JSON.stringify(pages)); 
+    const activePage = pages.find(p => p.id === activePageId);
 
-  try {
+    formData.append(
+      "elements",
+      JSON.stringify(activePage?.elements ?? [])
+    );
+
+    if (backgroundFile) {
+      formData.append("backgroundImage", backgroundFile);
+    }
+
     const res = await fetch("/api/certificate-templates", {
       method: isUpdate ? "PUT" : "POST",
-      // PENTING: JANGAN SET 'Content-Type': 'application/json'
-      // Browser akan otomatis set 'multipart/form-data; boundary=...'
       body: formData,
     });
 
-    if (res.ok) {
-      const result = await res.json();
-      alert(isUpdate ? "Template diperbarui!" : "Template dibuat!");
-      // Reset file state agar tidak terkirim lagi jika save ulang tanpa ganti bg
-      setBackgroundFile(null); 
-    } else {
-      const err = await res.json();
-      alert(`Gagal menyimpan template: ${err.error}`);
+    if (!res.ok) {
+      throw new Error("Failed to save template");
     }
-  } catch (error) {
-    console.error("Save error:", error);
-    alert("Terjadi kesalahan koneksi");
-  }
-};
+
+    const data = await res.json();
+    setTemplateId(data.id);
+  };
+
 
   // 5. ADD ELEMENT (DYNAMIC CENTER)
   const addElement = (type: "nomor" | "tanggal" | "mentor" | "text" | "name") => {
@@ -156,7 +156,7 @@ const saveTemplate = async () => {
       x: centerX,
       y: centerY + stackOffset,
       fontSize: autoFontSize,
-      fontFamily: "Arial",
+      fontFamily: "Roboto",
       fontWeight: "normal",
       fontStyle: "normal",
       underline: false,
