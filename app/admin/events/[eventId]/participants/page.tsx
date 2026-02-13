@@ -4,16 +4,22 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
 type Participant = {
-  certificateId?: string | null;
   id: string;
   name: string;
   email: string;
 };
 
+type ParticipantWithCert = Participant & {
+  certificateId?: string | null;
+};
+
 export default function ParticipantsPage() {
   const { eventId } = useParams<{ eventId: string }>();
 
-  const [participants, setParticipants] = useState<Participant[]>([]);
+  console.log("eventId:", eventId);
+
+
+  const [participants, setParticipants] = useState<ParticipantWithCert[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -21,13 +27,31 @@ export default function ParticipantsPage() {
 
   const loadParticipants = async () => {
     try {
+      if (!eventId) return;
       const res = await fetch(`/api/participants?eventId=${eventId}`);
       if (!res.ok) {
         console.error("Failed to load participants");
         return;
       }
       const data = await res.json();
-      setParticipants(data);
+      
+      // Fetch certificates untuk setiap participant
+      const participantsWithCerts = await Promise.all(
+        data.map(async (p: Participant) => {
+          try {
+            const certRes = await fetch(`/api/certificates/by-participant?participantId=${p.id}`);
+            if (certRes.ok) {
+              const cert = await certRes.json();
+              return { ...p, certificateId: cert.id };
+            }
+          } catch (err) {
+            // Participant belum punya certificate
+          }
+          return { ...p, certificateId: null };
+        })
+      );
+      
+      setParticipants(participantsWithCerts);
     } catch (error) {
       console.error("Load participants error:", error);
     }
@@ -36,22 +60,40 @@ export default function ParticipantsPage() {
   // Load participants on mount
   useEffect(() => {
     let ignore = false;
-    
+
     async function fetchParticipants() {
       try {
+        if (!eventId) return;
         const res = await fetch(`/api/participants?eventId=${eventId}`);
         if (!res.ok) return;
         const data = await res.json();
+        
         if (!ignore) {
-          setParticipants(data);
+          // Fetch certificates untuk setiap participant
+          const participantsWithCerts = await Promise.all(
+            data.map(async (p: Participant) => {
+              try {
+                const certRes = await fetch(`/api/certificates/by-participant?participantId=${p.id}`);
+                if (certRes.ok) {
+                  const cert = await certRes.json();
+                  return { ...p, certificateId: cert.id };
+                }
+              } catch (err) {
+                // Participant belum punya certificate
+              }
+              return { ...p, certificateId: null };
+            })
+          );
+          
+          setParticipants(participantsWithCerts);
         }
       } catch (error) {
         console.error("Fetch error:", error);
       }
     }
-    
+
     fetchParticipants();
-    
+
     return () => {
       ignore = true;
     };
@@ -175,7 +217,7 @@ export default function ParticipantsPage() {
       alert(
         `✅ ${data.total} sertifikat berhasil dibuat!\n\nKlik tombol "View / Download" untuk melihat sertifikat.`
       );
-      
+
       setSelectedIds([]); // Clear selection
       loadParticipants(); // Refresh list
     } catch (error) {
@@ -238,7 +280,7 @@ export default function ParticipantsPage() {
       </div>
 
       {/* CSV Upload */}
-      <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl shadow-md p-6 mb-6 border-2 border-dashed border-purple-200">
+      <div className="bg-linear-to-r from-purple-50 to-blue-50 rounded-xl shadow-md p-6 mb-6 border-2 border-dashed border-purple-200">
         <h2 className="text-lg font-bold text-gray-800 mb-2">
           📤 Upload CSV (Bulk Import)
         </h2>

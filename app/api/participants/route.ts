@@ -1,52 +1,88 @@
 import { db } from "@/db";
 import { participants } from "@/db/schema/participant";
-import { certificates } from "@/db/schema/certificate"; // <--- TAMBAHAN IMPORT
 import { eq } from "drizzle-orm";
+import { NextResponse } from "next/server";
 
+// GET - Ambil participants berdasarkan eventId
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const eventId = searchParams.get("eventId");
+  try {
+    const { searchParams } = new URL(req.url);
+    const eventId = searchParams.get("eventId");
 
-  if (!eventId) {
-    return Response.json({ error: "eventId required" }, { status: 400 });
+    if (!eventId) {
+      return NextResponse.json(
+        { error: "eventId wajib diisi" },
+        { status: 400 }
+      );
+    }
+
+    const allParticipants = await db
+      .select()
+      .from(participants)
+      .where(eq(participants.eventId, eventId))
+      .orderBy(participants.createdAt);
+
+    return NextResponse.json(allParticipants);
+  } catch (error) {
+    console.error("GET participants error:", error);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
   }
-
-  // PERBAIKAN: Gunakan Left Join untuk mengambil ID Sertifikat (jika ada)
-  const data = await db
-    .select({
-      id: participants.id,
-      name: participants.name,
-      email: participants.email,
-      eventId: participants.eventId,
-      certificateId: certificates.id, // <--- Ini yang dibutuhkan Frontend
-    })
-    .from(participants)
-    .leftJoin(certificates, eq(certificates.participantId, participants.id))
-    .where(eq(participants.eventId, eventId));
-
-  return Response.json(data);
 }
 
-// --- BAGIAN POST DAN DELETE DI BAWAH TETAP SAMA ---
-
+// POST - Tambah participant baru
 export async function POST(req: Request) {
-  const body = await req.json();
+  try {
+    const body = await req.json();
 
-  const [participant] = await db
-    .insert(participants)
-    .values({
-      eventId: body.eventId,
-      name: body.name,
-      email: body.email,
-    })
-    .returning();
+    if (!body.eventId || !body.name || !body.email) {
+      return NextResponse.json(
+        { error: "eventId, name, dan email wajib diisi" },
+        { status: 400 }
+      );
+    }
 
-  return Response.json(participant);
+    const [participant] = await db
+      .insert(participants)
+      .values({
+        eventId: body.eventId,
+        name: body.name,
+        email: body.email,
+      })
+      .returning();
+
+    return NextResponse.json(participant);
+  } catch (error) {
+    console.error("POST participant error:", error);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
+  }
 }
 
+// DELETE - Hapus participant
 export async function DELETE(req: Request) {
-  const { id } = await req.json();
+  try {
+    const { id } = await req.json();
 
-  await db.delete(participants).where(eq(participants.id, id));
-  return Response.json({ success: true });
+    if (!id) {
+      return NextResponse.json(
+        { error: "id wajib diisi" },
+        { status: 400 }
+      );
+    }
+
+    await db.delete(participants).where(eq(participants.id, id));
+    
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("DELETE participant error:", error);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
+  }
 }

@@ -42,11 +42,12 @@ export async function GET(
       );
     }
 
-    // 3. Ambil Data Template
+    // 3. Ambil Data Template berdasarkan participant.eventId
+    // PERBAIKAN: Gunakan participant.eventId karena certificate tidak punya eventId
     const [template] = await db
       .select()
       .from(certificateTemplates)
-      .where(eq(certificateTemplates.eventId, cert.eventId))
+      .where(eq(certificateTemplates.eventId, participant.eventId))
       .limit(1);
 
     if (!template) {

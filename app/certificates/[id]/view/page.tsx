@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import CanvasEditor from "@/components/certificate/CanvasEditor";
 import { useCertificateEditor } from "@/store/certificateEditor.store";
+import type { CertificatePage } from "@/db/schema/certificateTemplate";
 import jsPDF from "jspdf";
 
 interface ParticipantData {
@@ -17,13 +18,12 @@ interface CertificateData {
   certificate: {
     id: string;
     participantId: string;
-    eventId: string;
-    issuedAt: Date;
+    templateId: string;
   };
   participant: ParticipantData;
   template: {
     id: string;
-    pages: any[];
+    pages: CertificatePage[];
     eventId: string;
   };
 }
@@ -43,7 +43,7 @@ export default function CertificateViewPage() {
       try {
         setLoading(true);
         const res = await fetch(`/api/certificates/${id}/detail`);
-        
+
         if (!res.ok) {
           const errorData = await res.json();
           throw new Error(errorData.error || "Gagal mengambil data");
@@ -103,7 +103,7 @@ export default function CertificateViewPage() {
 
       // 2. Setup ukuran PDF sesuai ukuran Canvas
       const orientation = canvas.width > canvas.height ? "l" : "p";
-      
+
       // Konversi pixel ke mm (96 DPI standard)
       const widthMm = (canvas.width * 25.4) / 96;
       const heightMm = (canvas.height * 25.4) / 96;
@@ -185,7 +185,7 @@ export default function CertificateViewPage() {
   });
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-linear-to-br from-gray-50 to-gray-100 p-4">
       {/* Header Card */}
       <div className="mb-6 text-center max-w-2xl">
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-4">
@@ -236,7 +236,7 @@ export default function CertificateViewPage() {
 
       {/* Footer Info */}
       <div className="mt-6 text-center text-sm text-gray-500">
-        <p>💡 Tip: Klik tombol "Download PDF" untuk mendapatkan sertifikat dalam format PDF</p>
+        <p>💡 Tip: Klik tombol &quot;Download PDF&quot; untuk mendapatkan sertifikat dalam format PDF</p>
         <p className="text-xs mt-2">Certificate ID: {id}</p>
       </div>
     </div>

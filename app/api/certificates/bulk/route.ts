@@ -2,7 +2,7 @@ import { db } from "@/db";
 import { certificates } from "@/db/schema/certificate";
 import { participants } from "@/db/schema/participant";
 import { certificateTemplates } from "@/db/schema/certificateTemplate";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
@@ -42,7 +42,12 @@ export async function POST(req: Request) {
     const selectedParticipants = await db
       .select()
       .from(participants)
-      .where(inArray(participants.id, participantIds));
+      .where(
+        and(
+          inArray(participants.id, participantIds),
+          eq(participants.eventId, eventId)
+        )
+      );
 
     if (selectedParticipants.length === 0) {
       return NextResponse.json(
@@ -63,12 +68,11 @@ export async function POST(req: Request) {
         .limit(1);
 
       if (existing) {
-        // Jika sudah ada, update templateId (bisa jadi template berubah)
+        // Jika sudah ada, update templateId
         const [updated] = await db
           .update(certificates)
           .set({
             templateId: template.id,
-            updatedAt: new Date(),
           })
           .where(eq(certificates.id, existing.id))
           .returning();
@@ -81,19 +85,11 @@ export async function POST(req: Request) {
           .values({
             participantId: participant.id,
             templateId: template.id,
-            eventId: eventId,
-            issuedAt: new Date(),
           })
           .returning();
 
         generatedCerts.push(newCert);
       }
-
-      // Update participant dengan certificateId
-      await db
-        .update(participants)
-        .set({ certificateId: generatedCerts[generatedCerts.length - 1].id })
-        .where(eq(participants.id, participant.id));
     }
 
     return NextResponse.json({

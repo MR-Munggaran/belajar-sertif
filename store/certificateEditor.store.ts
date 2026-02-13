@@ -9,7 +9,7 @@ import type {
 // --- TYPES ---
 
 interface CertificateEditorState {
-  // Global Settings
+  // Global Settings (UI State - diambil dari active page)
   paperSize: PaperSize;
   orientation: Orientation;
   canvasSize: { width: number; height: number };
@@ -21,7 +21,7 @@ interface CertificateEditorState {
 
   // --- ACTIONS ---
   
-  // Settings
+  // Settings (Update ke active page)
   setPaperSize: (size: PaperSize) => void;
   setOrientation: (orientation: Orientation) => void;
   
@@ -51,16 +51,29 @@ interface CertificateEditorState {
 
 // --- HELPER FUNCTIONS ---
 
+// Helper untuk convert page paper size ke PaperSize yang valid
+const normalizePaperSize = (size: string | undefined): PaperSize => {
+  if (size === "A4" || size === "Letter") return size;
+  return "A4"; // Default fallback
+};
+
+const normalizeOrientation = (orientation: string | undefined): Orientation => {
+  if (orientation === "portrait" || orientation === "landscape") return orientation;
+  return "landscape"; // Default fallback
+};
+
 const createDefaultPage = (id: string, pageNumber: number): CertificatePage => ({
   id,
   pageNumber,
   elements: [],
   backgroundImage: null,
+  paperSize: "A4", // Default paper size
+  orientation: "landscape", // Default orientation
 });
 
 // --- STORE IMPLEMENTATION ---
 
-export const useCertificateEditor = create<CertificateEditorState>((set, get) => ({
+export const useCertificateEditor = create<CertificateEditorState>((set) => ({
   // Default State
   paperSize: "A4",
   orientation: "landscape",
@@ -73,21 +86,35 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
 
   // --- SETTINGS ---
 
-  setPaperSize: (size) => {
-    const { orientation } = get();
-    set({ 
-      paperSize: size, 
-      canvasSize: getCanvasDimensions(size, orientation) 
-    });
-  },
+  setPaperSize: (size) => set((state) => {
+    const activePage = state.pages.find(p => p.id === state.activePageId);
+    const orientation = normalizeOrientation(activePage?.orientation);
+    
+    return {
+      paperSize: size,
+      canvasSize: getCanvasDimensions(size, orientation),
+      pages: state.pages.map(p => 
+        p.id === state.activePageId 
+          ? { ...p, paperSize: size }
+          : p
+      )
+    };
+  }),
 
-  setOrientation: (orientation) => {
-    const { paperSize } = get();
-    set({ 
-      orientation, 
-      canvasSize: getCanvasDimensions(paperSize, orientation) 
-    });
-  },
+  setOrientation: (orientation) => set((state) => {
+    const activePage = state.pages.find(p => p.id === state.activePageId);
+    const paperSize = normalizePaperSize(activePage?.paperSize);
+    
+    return {
+      orientation,
+      canvasSize: getCanvasDimensions(paperSize, orientation),
+      pages: state.pages.map(p => 
+        p.id === state.activePageId 
+          ? { ...p, orientation }
+          : p
+      )
+    };
+  }),
 
   // --- PAGE MANAGEMENT ---
 
@@ -100,7 +127,11 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
         ...state.pages, 
         createDefaultPage(newPageId, newPageNumber)
       ],
-      activePageId: newPageId
+      activePageId: newPageId,
+      // Reset ke default saat page baru
+      paperSize: "A4" as PaperSize,
+      orientation: "landscape" as Orientation,
+      canvasSize: getCanvasDimensions("A4", "landscape")
     };
   }),
 
@@ -116,13 +147,38 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
       pageNumber: index + 1
     }));
     
+    // Ambil page yang akan jadi aktif
+    const newActivePage = state.activePageId === id 
+      ? reindexedPages[0] 
+      : reindexedPages.find(p => p.id === state.activePageId)!;
+    
+    const normalizedSize = normalizePaperSize(newActivePage.paperSize);
+    const normalizedOrientation = normalizeOrientation(newActivePage.orientation);
+    
     return {
       pages: reindexedPages,
-      activePageId: state.activePageId === id ? reindexedPages[0].id : state.activePageId
+      activePageId: newActivePage.id,
+      paperSize: normalizedSize,
+      orientation: normalizedOrientation,
+      canvasSize: getCanvasDimensions(normalizedSize, normalizedOrientation)
     };
   }),
 
-  setActivePage: (id) => set({ activePageId: id, draggingId: null }),
+  setActivePage: (id) => set((state) => {
+    const page = state.pages.find(p => p.id === id);
+    if (!page) return state;
+    
+    const normalizedSize = normalizePaperSize(page.paperSize);
+    const normalizedOrientation = normalizeOrientation(page.orientation);
+    
+    return {
+      activePageId: id,
+      draggingId: null,
+      paperSize: normalizedSize,
+      orientation: normalizedOrientation,
+      canvasSize: getCanvasDimensions(normalizedSize, normalizedOrientation)
+    };
+  }),
 
   // --- LOAD TEMPLATE ---
 
@@ -131,7 +187,10 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
     if (!pages || pages.length === 0) {
       return {
         pages: [createDefaultPage("page_1", 1)],
-        activePageId: "page_1"
+        activePageId: "page_1",
+        paperSize: "A4" as PaperSize,
+        orientation: "landscape" as Orientation,
+        canvasSize: getCanvasDimensions("A4", "landscape")
       };
     }
     
@@ -141,11 +200,20 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
       pageNumber: page.pageNumber || index + 1,
       elements: page.elements || [],
       backgroundImage: page.backgroundImage || null,
+      paperSize: page.paperSize || "A4",
+      orientation: page.orientation || "landscape",
     }));
+    
+    const firstPage = validatedPages[0];
+    const normalizedSize = normalizePaperSize(firstPage.paperSize);
+    const normalizedOrientation = normalizeOrientation(firstPage.orientation);
     
     return {
       pages: validatedPages,
-      activePageId: validatedPages[0].id
+      activePageId: firstPage.id,
+      paperSize: normalizedSize,
+      orientation: normalizedOrientation,
+      canvasSize: getCanvasDimensions(normalizedSize, normalizedOrientation)
     };
   }),
 
@@ -240,8 +308,8 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
 
   // Reset ke state awal
   reset: () => set({
-    paperSize: "A4",
-    orientation: "landscape",
+    paperSize: "A4" as PaperSize,
+    orientation: "landscape" as Orientation,
     canvasSize: getCanvasDimensions("A4", "landscape"),
     pages: [createDefaultPage("page_1", 1)],
     activePageId: "page_1",

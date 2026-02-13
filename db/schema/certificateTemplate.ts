@@ -31,20 +31,24 @@ export type CertificateElement = {
   height?: number;
 };
 
-// 4. Struktur Page (Setiap page punya background sendiri)
+// 4. Struktur Page (Setiap page punya background sendiri + paper settings)
 export type CertificatePage = {
   id: string;
   pageNumber: number;
   backgroundImage: string | null; // URL Background per halaman
   elements: CertificateElement[];
+  paperSize?: "A4" | "Letter"; // Default: "A4"
+  orientation?: "portrait" | "landscape"; // Default: "landscape"
 };
 
 // 5. Tabel Database
 export const certificateTemplates = pgTable("certificate_templates", {
   id: uuid("id").defaultRandom().primaryKey(),
   eventId: uuid("event_id").notNull(),
+  
   // Simpan sebagai array of pages agar urutan halaman terjaga
   pages: jsonb("pages").$type<CertificatePage[]>().notNull().default([]),
+  
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

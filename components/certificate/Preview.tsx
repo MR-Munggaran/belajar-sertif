@@ -23,7 +23,7 @@ export default function Preview() {
   return (
     <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 p-4">
+      <div className="bg-linear-to-r from-blue-50 to-indigo-50 border-b border-gray-200 p-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-bold text-lg text-gray-800 flex items-center gap-2">

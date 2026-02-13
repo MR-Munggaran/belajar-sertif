@@ -309,7 +309,7 @@ export default function TemplatesPage() {
               <button
                 onClick={() => setActivePage(page.id)}
                 className={`
-                  px-4 py-2 text-xs font-bold rounded-lg border flex flex-col items-center justify-center min-w-[80px] transition-all
+                  px-4 py-2 text-xs font-bold rounded-lg border flex flex-col items-center justify-center min-w-20 transition-all
                   ${
                     activePageId === page.id
                       ? "bg-blue-50 border-blue-500 text-blue-700 shadow-sm ring-1 ring-blue-200"
@@ -388,7 +388,7 @@ export default function TemplatesPage() {
             {backgroundFiles[activePageId] && (
               <div className="mt-2 text-[10px] text-green-600 flex items-center gap-1">
                 ✓ File siap diupload:{" "}
-                <span className="truncate max-w-[150px] font-medium">
+                <span className="truncate max-w-37.5 font-medium">
                   {backgroundFiles[activePageId].name}
                 </span>
               </div>
@@ -425,7 +425,7 @@ export default function TemplatesPage() {
           <div className="border-t border-gray-100 my-1"></div>
 
           {/* 3. Properties Form */}
-          <div className="flex-grow">
+          <div className="grow">
             <ElementForm />
           </div>
 
