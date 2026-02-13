@@ -1,76 +1,112 @@
 import { db } from "@/db";
+import { certificates } from "@/db/schema/certificate";
 import { participants } from "@/db/schema/participant";
 import { certificateTemplates } from "@/db/schema/certificateTemplate";
-import { certificates } from "@/db/schema/certificate";
-import { eq, inArray, and } from "drizzle-orm";
-import { randomUUID } from "crypto";
+import { eq, inArray } from "drizzle-orm";
+import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
-  const { eventId, participantIds } = await req.json();
+  try {
+    const body = await req.json();
+    const { eventId, participantIds } = body;
 
-  if (!eventId || !Array.isArray(participantIds) || participantIds.length === 0) {
-    return Response.json(
-      { error: "eventId & participantIds required" },
-      { status: 400 }
-    );
-  }
+    if (!eventId || !participantIds || !Array.isArray(participantIds)) {
+      return NextResponse.json(
+        { error: "eventId dan participantIds (array) wajib diisi" },
+        { status: 400 }
+      );
+    }
 
-  const [template] = await db
-    .select()
-    .from(certificateTemplates)
-    .where(eq(certificateTemplates.eventId, eventId));
+    if (participantIds.length === 0) {
+      return NextResponse.json(
+        { error: "Pilih minimal 1 participant" },
+        { status: 400 }
+      );
+    }
 
-  if (!template) {
-    return Response.json({ error: "Template not found" }, { status: 404 });
-  }
+    // 1. Cek apakah template sudah dibuat untuk event ini
+    const [template] = await db
+      .select()
+      .from(certificateTemplates)
+      .where(eq(certificateTemplates.eventId, eventId))
+      .limit(1);
 
-  const users = await db
-    .select()
-    .from(participants)
-    .where(inArray(participants.id, participantIds));
+    if (!template) {
+      return NextResponse.json(
+        { error: "Template sertifikat belum dibuat untuk event ini" },
+        { status: 404 }
+      );
+    }
 
-  if (users.length === 0) {
-    return Response.json(
-      { error: "Participants not found" },
-      { status: 404 }
-    );
-  }
+    // 2. Ambil data participants yang dipilih
+    const selectedParticipants = await db
+      .select()
+      .from(participants)
+      .where(inArray(participants.id, participantIds));
 
-  const exists = await db
-    .select()
-    .from(certificates)
-    .where(
-      and(
-        inArray(certificates.participantId, participantIds),
-        eq(certificates.templateId, template.id)
-      )
-    );
+    if (selectedParticipants.length === 0) {
+      return NextResponse.json(
+        { error: "Tidak ada participant yang valid" },
+        { status: 404 }
+      );
+    }
 
-  const existingIds = new Set(exists.map(e => e.participantId));
+    // 3. Generate certificates untuk setiap participant
+    const generatedCerts = [];
 
-  const payload = users
-    .filter(u => !existingIds.has(u.id))
-    .map(u => {
-      const certId = randomUUID();
-      return {
-        id: certId,
-        participantId: u.id,
-        templateId: template.id,
-        fileUrl: `/certificates/${certId}.pdf`,
-      };
+    for (const participant of selectedParticipants) {
+      // Cek apakah sudah punya sertifikat
+      const [existing] = await db
+        .select()
+        .from(certificates)
+        .where(eq(certificates.participantId, participant.id))
+        .limit(1);
+
+      if (existing) {
+        // Jika sudah ada, update templateId (bisa jadi template berubah)
+        const [updated] = await db
+          .update(certificates)
+          .set({
+            templateId: template.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(certificates.id, existing.id))
+          .returning();
+
+        generatedCerts.push(updated);
+      } else {
+        // Buat sertifikat baru
+        const [newCert] = await db
+          .insert(certificates)
+          .values({
+            participantId: participant.id,
+            templateId: template.id,
+            eventId: eventId,
+            issuedAt: new Date(),
+          })
+          .returning();
+
+        generatedCerts.push(newCert);
+      }
+
+      // Update participant dengan certificateId
+      await db
+        .update(participants)
+        .set({ certificateId: generatedCerts[generatedCerts.length - 1].id })
+        .where(eq(participants.id, participant.id));
+    }
+
+    return NextResponse.json({
+      success: true,
+      total: generatedCerts.length,
+      certificates: generatedCerts,
+      message: `${generatedCerts.length} sertifikat berhasil dibuat`,
     });
-
-  if (payload.length === 0) {
-    return Response.json({
-      message: "All selected participants already have certificates",
-    });
+  } catch (error) {
+    console.error("Bulk generate error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Server error" },
+      { status: 500 }
+    );
   }
-
-  await db.insert(certificates).values(payload);
-
-  return Response.json({
-    total: payload.length,
-    generated: payload.map(p => p.participantId),
-    skipped: [...existingIds],
-  });
 }

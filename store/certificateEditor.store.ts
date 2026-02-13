@@ -1,32 +1,12 @@
 import { create } from "zustand";
 import { PaperSize, Orientation, getCanvasDimensions } from "@/utils/paperSizes";
+import type { 
+  CertificatePage, 
+  CertificateElement,
+  ElementStyle 
+} from "@/db/schema/certificateTemplate";
 
 // --- TYPES ---
-
-// Pastikan ini match dengan Schema Database
-export interface CertificateElement {
-  id: string;
-  type: "static" | "field";
-  field?: "participant.name" | "participant.email" | "certificate.number" | "certificate.date";
-  text?: string;
-  x: number;
-  y: number;
-  fontSize: number;
-  fontFamily: string;
-  fontWeight: string;
-  fontStyle: string;
-  underline: boolean;
-  color: string;
-  rotation?: number;
-  width?: number; // Opsional: untuk gambar/shape kedepannya
-  height?: number;
-}
-
-interface Page {
-  id: string;
-  elements: CertificateElement[];
-  backgroundImage: string | null;
-}
 
 interface CertificateEditorState {
   // Global Settings
@@ -35,7 +15,7 @@ interface CertificateEditorState {
   canvasSize: { width: number; height: number };
 
   // Multi-page Data
-  pages: Page[];
+  pages: CertificatePage[];
   activePageId: string;
   draggingId: string | null;
 
@@ -50,21 +30,18 @@ interface CertificateEditorState {
   removePage: (id: string) => void;
   setActivePage: (id: string) => void;
 
-  // Load Data (PENTING untuk Edit Template)
-  loadTemplate: (data: { backgroundImage: string; elements: CertificateElement[] }) => void;
+  // Load Data (untuk Edit Template)
+  loadTemplate: (pages: CertificatePage[]) => void;
 
   // Element & Background (Targeting Active Page)
   setBackgroundImage: (url: string | null) => void;
-  setElements: (elements: CertificateElement[]) => void;
   addElement: (element: CertificateElement) => void;
-  updateElement: (id: string, data: Partial<CertificateElement>) => void;
+  updateElementPosition: (id: string, x: number, y: number) => void;
+  updateElementStyle: (id: string, style: Partial<ElementStyle>) => void;
+  updateElementContent: (id: string, content: string) => void;
+  updateElementRotation: (id: string, rotation: number) => void;
   removeElement: (id: string) => void;
-  duplicateElement: (id: string) => void; // Fitur Baru
   
-  // Layering (Z-Index)
-  bringToFront: (id: string) => void; // Fitur Baru
-  sendToBack: (id: string) => void;   // Fitur Baru
-
   // Selection
   setDraggingId: (id: string | null) => void;
   
@@ -72,13 +49,16 @@ interface CertificateEditorState {
   reset: () => void;
 }
 
-// Helper ID Generator yang lebih aman
-const generateId = () => {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `el_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-};
+// --- HELPER FUNCTIONS ---
+
+const createDefaultPage = (id: string, pageNumber: number): CertificatePage => ({
+  id,
+  pageNumber,
+  elements: [],
+  backgroundImage: null,
+});
+
+// --- STORE IMPLEMENTATION ---
 
 export const useCertificateEditor = create<CertificateEditorState>((set, get) => ({
   // Default State
@@ -86,7 +66,8 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
   orientation: "landscape",
   canvasSize: getCanvasDimensions("A4", "landscape"),
   
-  pages: [{ id: "page_1", elements: [], backgroundImage: null }],
+  // Default 1 Halaman Kosong
+  pages: [createDefaultPage("page_1", 1)],
   activePageId: "page_1",
   draggingId: null,
 
@@ -112,47 +93,67 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
 
   addPage: () => set((state) => {
     const newPageId = `page_${Date.now()}`;
+    const newPageNumber = state.pages.length + 1;
+    
     return {
-      pages: [...state.pages, { id: newPageId, elements: [], backgroundImage: null }],
+      pages: [
+        ...state.pages, 
+        createDefaultPage(newPageId, newPageNumber)
+      ],
       activePageId: newPageId
     };
   }),
 
   removePage: (id) => set((state) => {
+    // Minimal harus ada 1 halaman
     if (state.pages.length <= 1) return state;
+    
     const newPages = state.pages.filter(p => p.id !== id);
+    
+    // Update pageNumber setelah delete
+    const reindexedPages = newPages.map((page, index) => ({
+      ...page,
+      pageNumber: index + 1
+    }));
+    
     return {
-      pages: newPages,
-      activePageId: state.activePageId === id ? newPages[0].id : state.activePageId
+      pages: reindexedPages,
+      activePageId: state.activePageId === id ? reindexedPages[0].id : state.activePageId
     };
   }),
 
   setActivePage: (id) => set({ activePageId: id, draggingId: null }),
 
-  // --- LOAD & SAVE HELPERS ---
+  // --- LOAD TEMPLATE ---
 
-  loadTemplate: ({ backgroundImage, elements }) => set((state) => {
-    // Override page aktif dengan data dari DB
+  loadTemplate: (pages) => set(() => {
+    // Jika data kosong, reset ke default
+    if (!pages || pages.length === 0) {
+      return {
+        pages: [createDefaultPage("page_1", 1)],
+        activePageId: "page_1"
+      };
+    }
+    
+    // Pastikan setiap page punya struktur yang valid
+    const validatedPages = pages.map((page, index) => ({
+      ...page,
+      pageNumber: page.pageNumber || index + 1,
+      elements: page.elements || [],
+      backgroundImage: page.backgroundImage || null,
+    }));
+    
     return {
-      pages: state.pages.map(p => 
-        p.id === state.activePageId 
-          ? { ...p, backgroundImage, elements } 
-          : p
-      )
+      pages: validatedPages,
+      activePageId: validatedPages[0].id
     };
   }),
 
-  // --- ELEMENT ACTIONS ---
+  // --- ELEMENT ACTIONS (Focus pada Active Page) ---
 
   setBackgroundImage: (url) => set((state) => ({
     pages: state.pages.map(p => 
       p.id === state.activePageId ? { ...p, backgroundImage: url } : p
-    )
-  })),
-
-  setElements: (elements) => set((state) => ({
-    pages: state.pages.map(p => 
-      p.id === state.activePageId ? { ...p, elements } : p
     )
   })),
 
@@ -161,20 +162,71 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
       p.id === state.activePageId 
         ? { ...p, elements: [...p.elements, element] } 
         : p
-    )
+    ),
+    draggingId: element.id // Auto-select element yang baru ditambahkan
   })),
 
-  updateElement: (elId, data) => set((state) => ({
+  // Update Posisi
+  updateElementPosition: (elId, x, y) => set((state) => ({
     pages: state.pages.map(p => 
       p.id === state.activePageId 
         ? {
             ...p,
-            elements: p.elements.map(el => el.id === elId ? { ...el, ...data } : el)
+            elements: p.elements.map(el => 
+              el.id === elId 
+                ? { ...el, position: { x, y } } 
+                : el
+            )
           }
         : p
     )
   })),
 
+  // Update Style
+  updateElementStyle: (elId, newStyle) => set((state) => ({
+    pages: state.pages.map(p => 
+      p.id === state.activePageId 
+        ? {
+            ...p,
+            elements: p.elements.map(el => 
+              el.id === elId 
+                ? { ...el, style: { ...el.style, ...newStyle } } 
+                : el
+            )
+          }
+        : p
+    )
+  })),
+
+  // Update Content
+  updateElementContent: (elId, content) => set((state) => ({
+    pages: state.pages.map(p => 
+      p.id === state.activePageId 
+        ? {
+            ...p,
+            elements: p.elements.map(el => 
+              el.id === elId ? { ...el, content } : el
+            )
+          }
+        : p
+    )
+  })),
+
+  // Update Rotation
+  updateElementRotation: (elId, rotation) => set((state) => ({
+    pages: state.pages.map(p => 
+      p.id === state.activePageId 
+        ? {
+            ...p,
+            elements: p.elements.map(el => 
+              el.id === elId ? { ...el, rotation } : el
+            )
+          }
+        : p
+    )
+  })),
+
+  // Remove Element
   removeElement: (elId) => set((state) => ({
     pages: state.pages.map(p => 
       p.id === state.activePageId 
@@ -184,77 +236,37 @@ export const useCertificateEditor = create<CertificateEditorState>((set, get) =>
     draggingId: state.draggingId === elId ? null : state.draggingId
   })),
 
-  duplicateElement: (elId) => set((state) => {
-    const activePage = state.pages.find(p => p.id === state.activePageId);
-    if (!activePage) return state;
-
-    const elToCopy = activePage.elements.find(el => el.id === elId);
-    if (!elToCopy) return state;
-
-    const newElement: CertificateElement = {
-      ...elToCopy,
-      id: generateId(),
-      x: elToCopy.x + 20, // Offset sedikit biar terlihat
-      y: elToCopy.y + 20,
-    };
-
-    return {
-      pages: state.pages.map(p => 
-        p.id === state.activePageId 
-          ? { ...p, elements: [...p.elements, newElement] }
-          : p
-      ),
-      draggingId: newElement.id // Otomatis select elemen baru
-    };
-  }),
-
-  // --- LAYERING (Z-INDEX) ---
-  // Dalam Canvas, urutan array menentukan tumpukan (index 0 paling bawah)
-
-  bringToFront: (elId) => set((state) => {
-    const page = state.pages.find(p => p.id === state.activePageId);
-    if (!page) return state;
-
-    const elIndex = page.elements.findIndex(el => el.id === elId);
-    if (elIndex < 0 || elIndex === page.elements.length - 1) return state;
-
-    const newElements = [...page.elements];
-    const [element] = newElements.splice(elIndex, 1);
-    newElements.push(element); // Pindah ke paling akhir (paling atas)
-
-    return {
-      pages: state.pages.map(p => 
-        p.id === state.activePageId ? { ...p, elements: newElements } : p
-      )
-    };
-  }),
-
-  sendToBack: (elId) => set((state) => {
-    const page = state.pages.find(p => p.id === state.activePageId);
-    if (!page) return state;
-
-    const elIndex = page.elements.findIndex(el => el.id === elId);
-    if (elIndex <= 0) return state; // Sudah paling bawah
-
-    const newElements = [...page.elements];
-    const [element] = newElements.splice(elIndex, 1);
-    newElements.unshift(element); // Pindah ke paling awal (paling bawah)
-
-    return {
-      pages: state.pages.map(p => 
-        p.id === state.activePageId ? { ...p, elements: newElements } : p
-      )
-    };
-  }),
-
   setDraggingId: (id) => set({ draggingId: id }),
 
+  // Reset ke state awal
   reset: () => set({
     paperSize: "A4",
     orientation: "landscape",
     canvasSize: getCanvasDimensions("A4", "landscape"),
-    pages: [{ id: "page_1", elements: [], backgroundImage: null }],
+    pages: [createDefaultPage("page_1", 1)],
     activePageId: "page_1",
     draggingId: null
   })
 }));
+
+// --- SELECTORS ---
+
+// Ambil halaman yang sedang aktif
+export const useActivePage = () =>
+  useCertificateEditor((s) =>
+    s.pages.find((p) => p.id === s.activePageId)
+  );
+
+// Ambil element yang sedang dipilih
+export const useActiveElement = () =>
+  useCertificateEditor((s) => {
+    const page = s.pages.find((p) => p.id === s.activePageId);
+    return page?.elements.find((el) => el.id === s.draggingId) ?? null;
+  });
+
+// Ambil semua elements di halaman aktif
+export const useActivePageElements = () =>
+  useCertificateEditor((s) => {
+    const page = s.pages.find((p) => p.id === s.activePageId);
+    return page?.elements ?? [];
+  });

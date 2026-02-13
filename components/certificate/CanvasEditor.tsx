@@ -1,10 +1,8 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
-import {
-  useCertificateEditor,
-  CertificateElement,
-} from "@/store/certificateEditor.store";
+import { useCertificateEditor } from "@/store/certificateEditor.store";
+import type { CertificateElement } from "@/db/schema/certificateTemplate";
 import { loadFont } from "@/utils/loadFont";
 
 // Konfigurasi Visual Handle
@@ -14,7 +12,7 @@ const SELECTION_PADDING = 8;
 
 type InteractionMode = "drag" | "resize" | "rotate" | null;
 
-// Tipe khusus untuk menyimpan state awal saat drag dimulai
+// State awal saat drag dimulai
 interface DragState {
   x: number;
   y: number;
@@ -27,6 +25,7 @@ interface PreviewProps {
     name: string;
     email?: string;
     certNumber?: string;
+    date?: string;
   } | null;
   readonly?: boolean;
 }
@@ -37,80 +36,91 @@ function normalizeElement(
   el: CertificateElement,
   data: PreviewProps["previewData"]
 ): CertificateElement {
-  let displayText = el.text ?? "";
+  let displayContent = el.content ?? "";
 
   // Replace placeholder dengan data preview jika ada
   if (el.type === "field" && data) {
-    if (el.field === "participant.name") displayText = data.name;
-    if (el.field === "participant.email") displayText = data.email || "";
-    if (el.field === "certificate.number") displayText = data.certNumber || "NO. 000";
-    if (el.field === "certificate.date") displayText = new Date().toLocaleDateString();
+    if (el.field === "participant.name") displayContent = data.name;
+    if (el.field === "participant.email") displayContent = data.email || "";
+    if (el.field === "certificate.number") displayContent = data.certNumber || "NO. 000";
+    if (el.field === "certificate.date") {
+      displayContent = data.date || new Date().toLocaleDateString("id-ID", {
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      });
+    }
   }
 
-  return { ...el, text: displayText };
+  return { ...el, content: displayContent };
 }
 
 function setContextFont(ctx: CanvasRenderingContext2D, el: CertificateElement) {
-  ctx.font = `${el.fontStyle || "normal"} ${el.fontWeight || "normal"} ${el.fontSize}px "${el.fontFamily || "Arial"}"`;
+  ctx.font = `${el.style.fontStyle || "normal"} ${el.style.fontWeight || "normal"} ${el.style.fontSize}px "${el.style.fontFamily || "Arial"}"`;
 }
 
 // Menghitung kotak pembatas (Bounding Box) elemen
 function getElementBounds(ctx: CanvasRenderingContext2D, el: CertificateElement) {
   ctx.save();
   setContextFont(ctx, el);
-  const metrics = ctx.measureText(el.text || "");
+  const metrics = ctx.measureText(el.content || "");
   const textWidth = metrics.width;
-  const textHeight = el.fontSize; // Estimasi tinggi font
+  const textHeight = el.style.fontSize;
   ctx.restore();
 
-  // Koordinat local (0,0 adalah tengah text karena textAlign center)
   const halfW = textWidth / 2;
   const halfH = textHeight / 2;
 
   return {
-    x: el.x,
-    y: el.y,
+    x: el.position.x,
+    y: el.position.y,
     width: textWidth,
     height: textHeight,
-    left: el.x - halfW - SELECTION_PADDING,
-    right: el.x + halfW + SELECTION_PADDING,
-    top: el.y - halfH - SELECTION_PADDING,
-    bottom: el.y + halfH + SELECTION_PADDING,
+    left: el.position.x - halfW - SELECTION_PADDING,
+    right: el.position.x + halfW + SELECTION_PADDING,
+    top: el.position.y - halfH - SELECTION_PADDING,
+    bottom: el.position.y + halfH + SELECTION_PADDING,
   };
 }
 
 export default function CanvasEditor({ previewData = null, readonly = false }: PreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  // 1. AMBIL STATE DARI STORE BARU
-  const { 
-    pages, 
-    activePageId, 
-    canvasSize, 
-    draggingId, 
-    setDraggingId, 
-    updateElement 
-  } = useCertificateEditor();
+
+  // 1. AMBIL STATE DARI STORE
+  const pages = useCertificateEditor((s) => s.pages);
+  const activePageId = useCertificateEditor((s) => s.activePageId);
+  const canvasSize = useCertificateEditor((s) => s.canvasSize);
+  const draggingId = useCertificateEditor((s) => s.draggingId);
+  const setDraggingId = useCertificateEditor((s) => s.setDraggingId);
+  const updateElementPosition = useCertificateEditor((s) => s.updateElementPosition);
+  const updateElementStyle = useCertificateEditor((s) => s.updateElementStyle);
+  const updateElementRotation = useCertificateEditor((s) => s.updateElementRotation);
 
   // 2. TENTUKAN PAGE & ELEMENTS AKTIF
-  const activePage = pages.find((p) => p.id === activePageId);
+  const activePage = useMemo(
+    () => pages.find((p) => p.id === activePageId),
+    [pages, activePageId]
+  );
+
   const elements = useMemo(
     () => activePage?.elements ?? [],
     [activePage]
   );
+
   const backgroundImage = activePage?.backgroundImage || null;
 
   const bgImageRef = useRef<HTMLImageElement | null>(null);
   const [mode, setMode] = useState<InteractionMode>(null);
-  
+
   // Refs untuk drag logic
   const dragStart = useRef({ x: 0, y: 0 });
-  
-  // FIX: Gunakan Interface DragState yang jelas
   const initialElState = useRef<DragState>({
-    x: 0, y: 0, fontSize: 0, rotation: 0
+    x: 0,
+    y: 0,
+    fontSize: 0,
+    rotation: 0,
   });
-  
+
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -126,10 +136,9 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
     // A. Draw Background
     const bgImage = bgImageRef.current;
 
-    if (bgImage) {
+    if (bgImage && bgImage.complete) {
       ctx.drawImage(bgImage, 0, 0, canvasSize.width, canvasSize.height);
-    }
-    else {
+    } else {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
       ctx.strokeStyle = "#e5e7eb";
@@ -140,68 +149,83 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
     // B. Draw Elements
     elements.forEach((rawEl) => {
       const el = normalizeElement(rawEl, previewData);
-      
+
       ctx.save();
-      ctx.translate(el.x, el.y);
+      ctx.translate(el.position.x, el.position.y);
       ctx.rotate(((el.rotation || 0) * Math.PI) / 180);
 
       setContextFont(ctx, el);
-      ctx.fillStyle = el.color;
-      ctx.textAlign = "center";
+      ctx.fillStyle = el.style.color;
+      ctx.textAlign = el.style.textAlign || "center";
       ctx.textBaseline = "middle";
-      
+
       if (!readonly) {
         ctx.shadowColor = "rgba(0,0,0,0.1)";
         ctx.shadowBlur = 2;
       }
 
-      ctx.fillText(el.text || "", 0, 0);
+      // Draw text
+      ctx.fillText(el.content || "", 0, 0);
 
       // Render Underline
-      if (el.underline) {
-        const metrics = ctx.measureText(el.text || "");
+      if (el.style.underline) {
+        const metrics = ctx.measureText(el.content || "");
         const w = metrics.width;
-        const h = el.fontSize;
+        const h = el.style.fontSize;
         ctx.beginPath();
-        ctx.strokeStyle = el.color;
-        ctx.lineWidth = Math.max(1, el.fontSize / 15);
-        ctx.moveTo(-w / 2, h / 2);
-        ctx.lineTo(w / 2, h / 2);
+        ctx.strokeStyle = el.style.color;
+        ctx.lineWidth = Math.max(1, el.style.fontSize / 15);
+        
+        // Adjust underline position based on textAlign
+        let startX = -w / 2;
+        let endX = w / 2;
+        if (el.style.textAlign === "left") {
+          startX = 0;
+          endX = w;
+        } else if (el.style.textAlign === "right") {
+          startX = -w;
+          endX = 0;
+        }
+        
+        ctx.moveTo(startX, h / 2);
+        ctx.lineTo(endX, h / 2);
         ctx.stroke();
       }
 
       // C. Selection UI
       if (!readonly && el.id === draggingId) {
-        const metrics = ctx.measureText(el.text || "");
+        const metrics = ctx.measureText(el.content || "");
         const w = metrics.width;
-        const h = el.fontSize;
-        
+        const h = el.style.fontSize;
+
         // Box Garis Putus-putus
-        ctx.strokeStyle = "#2563eb"; 
+        ctx.strokeStyle = "#2563eb";
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 2]);
         ctx.strokeRect(
-          -w / 2 - SELECTION_PADDING, 
-          -h / 2 - SELECTION_PADDING, 
-          w + SELECTION_PADDING * 2, 
+          -w / 2 - SELECTION_PADDING,
+          -h / 2 - SELECTION_PADDING,
+          w + SELECTION_PADDING * 2,
           h + SELECTION_PADDING * 2
         );
 
-        ctx.setLineDash([]); 
+        ctx.setLineDash([]);
 
-        // Handle Resize
+        // Handle Resize (kanan bawah)
         ctx.fillStyle = "#2563eb";
         ctx.fillRect(
-          w / 2 + SELECTION_PADDING - HANDLE_SIZE / 2, 
-          h / 2 + SELECTION_PADDING - HANDLE_SIZE / 2, 
-          HANDLE_SIZE, 
+          w / 2 + SELECTION_PADDING - HANDLE_SIZE / 2,
+          h / 2 + SELECTION_PADDING - HANDLE_SIZE / 2,
+          HANDLE_SIZE,
           HANDLE_SIZE
         );
 
-        // Handle Rotate
+        // Handle Rotate (atas tengah)
         ctx.beginPath();
         ctx.moveTo(0, -h / 2 - SELECTION_PADDING);
         ctx.lineTo(0, -h / 2 - SELECTION_PADDING - ROTATE_HANDLE_OFFSET);
+        ctx.strokeStyle = "#2563eb";
+        ctx.lineWidth = 2;
         ctx.stroke();
 
         ctx.beginPath();
@@ -209,6 +233,7 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
         ctx.fillStyle = "#ffffff";
         ctx.fill();
         ctx.strokeStyle = "#2563eb";
+        ctx.lineWidth = 2;
         ctx.stroke();
       }
 
@@ -216,11 +241,13 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
     });
   }, [elements, draggingId, previewData, readonly, canvasSize]);
 
+  // Load background image
   useEffect(() => {
     let isActive = true;
 
     if (!backgroundImage) {
       bgImageRef.current = null;
+      renderCanvas();
       return;
     }
 
@@ -231,11 +258,12 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
     img.onload = () => {
       if (!isActive) return;
       bgImageRef.current = img;
-      renderCanvas(); // redraw setelah load
+      renderCanvas();
     };
 
     img.onerror = () => {
       if (!isActive) return;
+      console.error("Failed to load background image");
       bgImageRef.current = null;
       renderCanvas();
     };
@@ -245,15 +273,12 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
     };
   }, [backgroundImage, renderCanvas]);
 
-
-
-  // 4. LOAD FONTS
+  // Load fonts
   useEffect(() => {
     elements.forEach((el) => {
-      if (el.fontFamily) loadFont(el.fontFamily);
+      if (el.style.fontFamily) loadFont(el.style.fontFamily);
     });
   }, [elements]);
-
 
   // Animation Loop
   useEffect(() => {
@@ -271,7 +296,7 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
   const getMousePos = (e: React.MouseEvent) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width; 
+    const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     return {
       x: (e.clientX - rect.left) * scaleX,
@@ -281,20 +306,21 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
 
   const checkHit = (ctx: CanvasRenderingContext2D, x: number, y: number, el: CertificateElement) => {
     const bounds = getElementBounds(ctx, el);
-    
-    const inBounds = 
-      x >= bounds.left && 
-      x <= bounds.right && 
-      y >= bounds.top && 
-      y <= bounds.bottom;
-      
-    const isRotate = 
-       x >= bounds.x - 10 && x <= bounds.x + 10 &&
-       y >= bounds.top - ROTATE_HANDLE_OFFSET - 10 && y <= bounds.top - 5;
 
-    const isResize = 
-       x >= bounds.right - 10 && x <= bounds.right + 10 &&
-       y >= bounds.bottom - 10 && y <= bounds.bottom + 10;
+    const inBounds =
+      x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
+
+    const isRotate =
+      x >= bounds.x - 10 &&
+      x <= bounds.x + 10 &&
+      y >= bounds.top - ROTATE_HANDLE_OFFSET - 10 &&
+      y <= bounds.top - 5;
+
+    const isResize =
+      x >= bounds.right - 10 &&
+      x <= bounds.right + 10 &&
+      y >= bounds.bottom - 10 &&
+      y <= bounds.bottom + 10;
 
     return { inBounds, isRotate, isResize, bounds };
   };
@@ -309,14 +335,13 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
       const { inBounds, isRotate, isResize } = checkHit(ctx, x, y, el);
 
       const isCurrentSelection = el.id === draggingId;
-      
-      // FIX: Replace 'as any' with explicit mapping
+
       const saveInitialState = () => {
         initialElState.current = {
-            x: el.x,
-            y: el.y,
-            fontSize: el.fontSize,
-            rotation: el.rotation || 0
+          x: el.position.x,
+          y: el.position.y,
+          fontSize: el.style.fontSize,
+          rotation: el.rotation || 0,
         };
       };
 
@@ -360,41 +385,36 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
       const dy = y - dragStart.current.y;
 
       if (mode === "drag") {
-        updateElement(draggingId, {
-          x: initialElState.current.x + dx,
-          y: initialElState.current.y + dy,
-        });
+        updateElementPosition(draggingId, initialElState.current.x + dx, initialElState.current.y + dy);
         canvas.style.cursor = "move";
-      } 
-      else if (mode === "resize") {
+      } else if (mode === "resize") {
         const scale = 0.5;
-        const newSize = Math.max(8, initialElState.current.fontSize + (dx * scale));
-        updateElement(draggingId, { fontSize: newSize });
+        const newSize = Math.max(8, initialElState.current.fontSize + dx * scale);
+        updateElementStyle(draggingId, { fontSize: newSize });
         canvas.style.cursor = "nwse-resize";
-      } 
-      else if (mode === "rotate") {
+      } else if (mode === "rotate") {
         const cx = initialElState.current.x;
         const cy = initialElState.current.y;
-        
+
         const angleStart = Math.atan2(dragStart.current.y - cy, dragStart.current.x - cx);
         const angleNow = Math.atan2(y - cy, x - cx);
         const angleDiff = (angleNow - angleStart) * (180 / Math.PI);
-        
-        updateElement(draggingId, { rotation: (initialElState.current.rotation + angleDiff) });
+
+        updateElementRotation(draggingId, initialElState.current.rotation + angleDiff);
         canvas.style.cursor = "grabbing";
       }
       return;
     }
 
-    // HOVER MODE logic (sama seperti sebelumnya)
+    // HOVER MODE logic
     let cursor = "default";
-    const activeEl = elements.find(el => el.id === draggingId);
+    const activeEl = elements.find((el) => el.id === draggingId);
     if (activeEl) {
-       const el = normalizeElement(activeEl, previewData);
-       const { isRotate, isResize, inBounds } = checkHit(ctx, x, y, el);
-       if (isRotate) cursor = "grab";
-       else if (isResize) cursor = "nwse-resize";
-       else if (inBounds) cursor = "move";
+      const el = normalizeElement(activeEl, previewData);
+      const { isRotate, isResize, inBounds } = checkHit(ctx, x, y, el);
+      if (isRotate) cursor = "grab";
+      else if (isResize) cursor = "nwse-resize";
+      else if (inBounds) cursor = "move";
     }
 
     if (cursor === "default") {
@@ -429,6 +449,8 @@ export default function CanvasEditor({ previewData = null, readonly = false }: P
           style={{
             maxWidth: "100%",
             maxHeight: "100%",
+            height: "auto",
+            width: "auto",
           }}
         />
       </div>

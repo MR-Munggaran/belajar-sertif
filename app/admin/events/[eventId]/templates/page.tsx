@@ -2,28 +2,35 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import CanvasEditor from "@/components/certificate/CanvasEditor"; 
-import ElementForm from "@/components/certificate/ElementForm"; 
-import { useCertificateEditor, CertificateElement } from "@/store/certificateEditor.store";
-import { PaperSize } from "@/utils/paperSizes"; // Pastikan file ini ada (lihat step 1 jawaban sebelumnya)
+import CanvasEditor from "@/components/certificate/CanvasEditor";
+import ElementForm from "@/components/certificate/ElementForm";
+import { useCertificateEditor } from "@/store/certificateEditor.store";
+import type { CertificateElement } from "@/db/schema/certificateTemplate";
+import { PaperSize } from "@/utils/paperSizes";
 
+// Helper ID Generator
 const generateId = (prefix: string) => `${prefix}_${Math.random().toString(36).substr(2, 9)}`;
 
 export default function TemplatesPage() {
   const params = useParams();
-  const [templateId, setTemplateId] = useState<string | null>(null);
   const eventId = params.eventId as string;
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [backgroundFile, setBackgroundFile] = useState<File | null>(null);
 
-  // 1. AMBIL STATE LENGKAP DARI STORE BARU
+  // State Lokal
+  const [templateId, setTemplateId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // PENTING: Menyimpan file mentah untuk upload per Page ID
+  // Format: { "page_1": File, "page_123": File }
+  const [backgroundFiles, setBackgroundFiles] = useState<Record<string, File>>({});
+
+  // Ambil State & Actions dari Store
   const {
-    // State Global
+    // State
     paperSize,
     orientation,
     canvasSize,
-    
-    // State Multi-page
     pages,
     activePageId,
 
@@ -33,66 +40,74 @@ export default function TemplatesPage() {
     setActivePage,
     addPage,
     removePage,
-    
-    // Actions untuk Page Aktif
     setBackgroundImage,
     loadTemplate,
     addElement: addToStore,
-    reset
+    reset,
   } = useCertificateEditor();
 
-// 2. LOAD TEMPLATE
+  // 1. LOAD TEMPLATE DARI SERVER
   useEffect(() => {
-    // 1. Reset store agar canvas bersih saat berpindah event/halaman
-    reset();
-
-    // 2. Fetch data
     const fetchTemplate = async () => {
       try {
+        setIsLoading(true);
+        reset(); // Reset store ke default
+
         const res = await fetch(`/api/certificate-templates?eventId=${eventId}`);
-        const data = await res.json();
+
+        if (!res.ok) {
+          console.error("API Error:", res.status, res.statusText);
+          setIsLoading(false);
+          return;
+        }
+
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : [];
 
         if (data && data.length > 0) {
-          const template = data[0]; // Ambil template pertama
-          
-          // Simpan ID untuk keperluan update nanti
+          const template = data[0];
           setTemplateId(template.id);
 
-          // 3. Masukkan data ke Store menggunakan action 'loadTemplate' yang baru
-          // Ini otomatis mengupdate page yang aktif
-          loadTemplate({
-            backgroundImage: template.backgroundImage || "",
-            elements: (template.elements as CertificateElement[]) || [],
-          });
-
-          // 4. (Opsional) Jika nanti di DB Anda menyimpan ukuran kertas
-          // Saat ini schema DB belum ada kolom paperSize/orientation, 
-          // tapi jika API mengirimnya, kita set:
-          if (template.paperSize) setPaperSize(template.paperSize);
-          if (template.orientation) setOrientation(template.orientation);
+          // Load ke store dengan validasi
+          if (template.pages && Array.isArray(template.pages)) {
+            loadTemplate(template.pages);
+          } else {
+            console.warn("Template tidak memiliki pages yang valid");
+          }
         }
       } catch (error) {
         console.error("Gagal memuat template:", error);
+        alert("Gagal memuat template. Silakan refresh halaman.");
+      } finally {
+        setIsLoading(false);
       }
     };
 
     fetchTemplate();
+  }, [eventId, reset, loadTemplate]);
 
-  }, [eventId, reset, loadTemplate, setPaperSize, setOrientation]);
+  // 2. HANDLE UPLOAD BACKGROUND (PER PAGE)
+  const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-// 3. HANDLE UPLOAD BACKGROUND
-const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
-  const file = e.target.files?.[0];
-  if (file) {
     if (!file.type.startsWith("image/")) {
-      alert("Harap upload file gambar (JPG/PNG).");
+      alert("Harap upload file gambar (JPG/PNG/WebP).");
       return;
     }
 
-    // A. SIMPAN FILE MENTAH UNTUK DIKIRIM KE SERVER
-    setBackgroundFile(file);
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Ukuran file terlalu besar (max 5MB).");
+      return;
+    }
 
-    // B. SIMPAN PREVIEW UNTUK DITAMPILKAN DI CANVAS
+    // A. Simpan File Mentah ke State Lokal (dikaitkan dengan activePageId)
+    setBackgroundFiles((prev) => ({
+      ...prev,
+      [activePageId]: file,
+    }));
+
+    // B. Buat Preview URL untuk ditampilkan di Canvas (Store)
     const reader = new FileReader();
     reader.onload = (ev) => {
       if (ev.target?.result) {
@@ -100,261 +115,351 @@ const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
       }
     };
     reader.readAsDataURL(file);
-  }
-};
 
-  // 4. SAVE TEMPLATE (FIXED)
-  const saveTemplate = async () => {
-    const isUpdate = Boolean(templateId);
-
-    const formData = new FormData();
-    formData.append("eventId", eventId);
-
-    if (isUpdate && templateId) {
-      formData.append("id", templateId);
-    }
-
-    const activePage = pages.find(p => p.id === activePageId);
-
-    formData.append(
-      "elements",
-      JSON.stringify(activePage?.elements ?? [])
-    );
-
-    if (backgroundFile) {
-      formData.append("backgroundImage", backgroundFile);
-    }
-
-    const res = await fetch("/api/certificate-templates", {
-      method: isUpdate ? "PUT" : "POST",
-      body: formData,
-    });
-
-    if (!res.ok) {
-      throw new Error("Failed to save template");
-    }
-
-    const data = await res.json();
-    setTemplateId(data.id);
+    // Reset input value
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  // 3. SAVE TEMPLATE
+  const saveTemplate = async () => {
+    try {
+      setIsSaving(true);
 
-  // 5. ADD ELEMENT (DYNAMIC CENTER)
+      const formData = new FormData();
+      formData.append("eventId", eventId);
+
+      // Kirim templateId jika ada (untuk update)
+      if (templateId) {
+        formData.append("templateId", templateId);
+      }
+
+      // 1. Kirim JSON Structure (Pages)
+      formData.append("pages", JSON.stringify(pages));
+
+      // 2. Kirim File Backgrounds
+      Object.entries(backgroundFiles).forEach(([pageId, file]) => {
+        formData.append(`bg_file_${pageId}`, file);
+      });
+
+      // 3. POST request (backend handle insert/update based on templateId)
+      const res = await fetch("/api/certificate-templates", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Gagal menyimpan template");
+      }
+
+      const result = await res.json();
+      setTemplateId(result.id);
+
+      // Bersihkan state file mentah
+      setBackgroundFiles({});
+
+      alert("✅ Template berhasil disimpan!");
+    } catch (error) {
+      console.error("Save error:", error);
+      alert(error instanceof Error ? error.message : "Terjadi kesalahan server");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 4. ADD ELEMENT
   const addElement = (type: "nomor" | "tanggal" | "mentor" | "text" | "name") => {
-    const currentWidth = canvasSize.width;
-    const currentHeight = canvasSize.height;
+    const { width, height } = canvasSize;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const autoFontSize = Math.max(12, Math.floor(width * 0.025));
 
-    const centerX = currentWidth / 2;
-    const centerY = currentHeight / 2;
-    // Ukuran font responsif terhadap ukuran kertas
-    const autoFontSize = Math.max(12, Math.floor(currentWidth * 0.025)); 
-    const stackOffset = Math.random() * 20; // Supaya tidak menumpuk persis
-
-    const baseElement: CertificateElement = {
+    // Base Element dengan Struktur Nested
+    const newElement: CertificateElement = {
       id: generateId(type),
-      text: "",
-      x: centerX,
-      y: centerY + stackOffset,
-      fontSize: autoFontSize,
-      fontFamily: "Roboto",
-      fontWeight: "normal",
-      fontStyle: "normal",
-      underline: false,
-      color: "#000000",
       type: "static",
+      content: "Teks Baru",
+      position: {
+        x: centerX,
+        y: centerY,
+      },
+      style: {
+        fontSize: autoFontSize,
+        fontFamily: "Roboto",
+        fontWeight: "normal",
+        fontStyle: "normal",
+        underline: false,
+        color: "#000000",
+        textAlign: "center",
+      },
+      rotation: 0,
     };
 
+    // Customisasi berdasarkan Tipe
     switch (type) {
       case "name":
-        baseElement.type = "field"; 
-        baseElement.field = "participant.name"; 
-        baseElement.text = "{Nama Peserta}"; 
-        baseElement.fontSize = Math.floor(autoFontSize * 2); // Nama biasanya besar
-        baseElement.fontWeight = "bold";
-        baseElement.y = centerY - (autoFontSize * 3);
+        newElement.type = "field";
+        newElement.field = "participant.name";
+        newElement.content = "{Nama Peserta}";
+        newElement.style.fontSize = Math.floor(autoFontSize * 2);
+        newElement.style.fontWeight = "bold";
+        newElement.position.y = centerY - autoFontSize * 3;
         break;
-      
+
       case "nomor":
-        baseElement.type = "field";
-        baseElement.field = "certificate.number";
-        baseElement.text = "No. {123/SERTIF/2026}";
-        baseElement.fontSize = Math.floor(autoFontSize * 0.8);
-        baseElement.y = centerY - (autoFontSize * 5);
+        newElement.type = "field";
+        newElement.field = "certificate.number";
+        newElement.content = "No. {123/SERTIF/2026}";
+        newElement.style.fontSize = Math.floor(autoFontSize * 0.8);
+        newElement.position.y = centerY - autoFontSize * 5;
         break;
-        
+
       case "tanggal":
-        baseElement.type = "field"; // Bisa jadi field otomatis
-        baseElement.field = "certificate.date";
-        baseElement.text = "Jakarta, 04 Februari 2026";
+        newElement.type = "field";
+        newElement.field = "certificate.date";
+        newElement.content = "Jakarta, 04 Februari 2026";
+        newElement.position.y = centerY + autoFontSize * 4;
         break;
-        
+
       case "mentor":
-        baseElement.text = "Nama Mentor";
-        baseElement.fontWeight = "bold";
-        break;
-        
-      default: 
-        baseElement.text = "Teks Baru";
+        newElement.content = "Nama Mentor";
+        newElement.style.fontWeight = "bold";
+        newElement.position.y = centerY + autoFontSize * 6;
         break;
     }
-    addToStore(baseElement);
+
+    addToStore(newElement);
   };
 
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 h-screen max-h-screen bg-gray-50">
-      
-      {/* --- KOLOM KIRI & TENGAH: WORKSPACE --- */}
-      <div className="lg:col-span-9 flex flex-col h-full relative border-r border-gray-200">
-        
-        {/* 1. TOP BAR: Paper Settings */}
-        <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm z-10">
-           <div className="flex items-center gap-6">
-              {/* Paper Size */}
-              <div className="flex flex-col">
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Paper Size</label>
-                <select 
-                  value={paperSize} 
-                  onChange={(e) => setPaperSize(e.target.value as PaperSize)}
-                  className="text-sm font-bold text-gray-700 bg-transparent border-none outline-none cursor-pointer hover:text-blue-600 focus:ring-0 p-0"
-                >
-                  <option value="A4">A4</option>
-                  <option value="A5">A5</option>
-                  <option value="Letter">Letter</option>
-                  <option value="Legal">Legal</option>
-                </select>
-              </div>
-
-              <div className="w-px h-8 bg-gray-200"></div>
-
-              {/* Orientation */}
-              <div className="flex bg-gray-100 rounded-lg p-1 gap-1">
-                 <button 
-                   onClick={() => setOrientation("portrait")}
-                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${orientation === 'portrait' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                 >
-                   Portrait
-                 </button>
-                 <button 
-                   onClick={() => setOrientation("landscape")}
-                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${orientation === 'landscape' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                 >
-                   Landscape
-                 </button>
-              </div>
-           </div>
-
-           <div className="text-xs text-gray-400 font-mono">
-             {canvasSize.width} x {canvasSize.height} px
-           </div>
-        </div>
-
-        {/* 2. CANVAS AREA */}
-        <div className="flex-1 bg-gray-100/80 overflow-hidden flex flex-col relative">
-           <div className="flex-1 flex items-center justify-center p-8 overflow-auto">
-              {/* Komponen Canvas Editor */}
-              <CanvasEditor />
-           </div>
-
-           {/* 3. BOTTOM BAR: Page Navigation */}
-           <div className="h-14 bg-white border-t border-gray-200 flex items-center px-4 gap-2 overflow-x-auto z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.02)]">
-              {pages.map((page, index) => (
-                <div key={page.id} className="group flex items-center relative">
-                  <button
-                    onClick={() => setActivePage(page.id)}
-                    className={`px-4 py-2 text-xs font-bold rounded-md border flex items-center gap-2 transition whitespace-nowrap
-                      ${activePageId === page.id 
-                        ? "bg-blue-50 border-blue-500 text-blue-700 shadow-sm" 
-                        : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"}`}
-                  >
-                    Halaman {index + 1}
-                  </button>
-                  
-                  {/* Delete Button (Muncul saat hover & jika bukan satu-satunya page) */}
-                  {pages.length > 1 && (
-                     <button 
-                        onClick={(e) => { e.stopPropagation(); removePage(page.id); }} 
-                        className={`absolute -top-2 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition shadow-sm hover:bg-red-600`}
-                        title="Hapus Halaman"
-                     >
-                       ✕
-                     </button>
-                  )}
-                </div>
-              ))}
-              
-              <button 
-                onClick={addPage}
-                className="ml-2 w-8 h-8 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 shadow-md transition transform hover:scale-105"
-                title="Tambah Halaman Baru"
-              >
-                <span className="text-lg font-bold mb-0.5">+</span>
-              </button>
-           </div>
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Memuat template...</p>
         </div>
       </div>
+    );
+  }
 
-      {/* --- KOLOM KANAN: TOOLS --- */}
-      <div className="lg:col-span-3 flex flex-col gap-4 h-full bg-white shadow-xl z-20 overflow-y-auto p-5">
-        
-        {/* Panel Upload Background (Untuk Active Page) */}
-        <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-           <h3 className="font-bold mb-3 text-gray-800 text-[10px] uppercase tracking-wider">Background (Halaman Ini)</h3>
-           <input 
-             type="file" 
-             accept="image/*" 
-             ref={fileInputRef} 
-             onChange={handleUploadBackground} 
-             className="hidden" 
-           />
-           <button 
-             onClick={() => fileInputRef.current?.click()}
-             className="w-full py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600 transition text-xs font-bold shadow-sm flex items-center justify-center gap-2"
-           >
-             <span>🖼️</span> Ganti Background
-           </button>
-        </div>
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 h-screen max-h-screen bg-gray-50 overflow-hidden">
+      {/* --- WORKSPACE (KIRI) --- */}
+      <div className="lg:col-span-9 flex flex-col h-full relative border-r border-gray-200">
+        {/* Top Bar */}
+        <div className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 shadow-sm z-20">
+          <div className="flex items-center gap-4">
+            {/* Paper Size Selector */}
+            <div className="flex flex-col">
+              <label className="text-[10px] font-bold text-gray-400 uppercase">
+                Size
+              </label>
+              <select
+                value={paperSize}
+                onChange={(e) => setPaperSize(e.target.value as PaperSize)}
+                className="text-sm font-bold text-gray-700 bg-transparent border-none outline-none cursor-pointer focus:ring-0 p-0"
+              >
+                <option value="A4">A4</option>
+                <option value="Letter">Letter</option>
+              </select>
+            </div>
 
-        {/* Panel Tambah Element */}
-        <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-          <h3 className="font-bold mb-3 text-gray-800 text-[10px] uppercase tracking-wider">Add Elements</h3>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => addElement("name")} className="btn-tool-modern">
-             🔤 Name
-            </button>
-            <button onClick={() => addElement("nomor")} className="btn-tool-modern">
-              🔢 No. Sertif
-            </button>
-            <button onClick={() => addElement("tanggal")} className="btn-tool-modern">
-              📅 Tanggal
-            </button>
-            <button onClick={() => addElement("mentor")} className="btn-tool-modern">
-              ✍️ Ttd
-            </button>
-            <button onClick={() => addElement("text")} className="btn-tool-modern col-span-2">
-              📝 Teks Bebas
-            </button>
+            <div className="w-px h-6 bg-gray-200"></div>
+
+            {/* Orientation Toggle */}
+            <div className="flex bg-gray-100 rounded-md p-1">
+              <button
+                onClick={() => setOrientation("portrait")}
+                className={`px-2 py-1 text-xs font-medium rounded transition ${
+                  orientation === "portrait"
+                    ? "bg-white shadow text-blue-600"
+                    : "text-gray-500"
+                }`}
+              >
+                Portrait
+              </button>
+              <button
+                onClick={() => setOrientation("landscape")}
+                className={`px-2 py-1 text-xs font-medium rounded transition ${
+                  orientation === "landscape"
+                    ? "bg-white shadow text-blue-600"
+                    : "text-gray-500"
+                }`}
+              >
+                Landscape
+              </button>
+            </div>
+          </div>
+
+          <div className="text-xs text-gray-400 font-mono">
+            {canvasSize.width} x {canvasSize.height} px
           </div>
         </div>
 
-        {/* Panel Edit Properties */}
-        <div className="grow flex flex-col">
-           <div className="border-t border-gray-100 my-2"></div>
-           <ElementForm />
+        {/* Canvas Area */}
+        <div className="flex-1 bg-gray-200/50 overflow-auto flex items-center justify-center p-8 relative">
+          <CanvasEditor />
         </div>
 
-        {/* Tombol Simpan */}
-        <button
-          onClick={saveTemplate}
-          className="bg-gray-900 text-white w-full py-3.5 rounded-xl hover:bg-black transition font-bold shadow-lg text-sm mt-auto flex items-center justify-center gap-2"
-        >
-          <span>💾</span> Simpan Project
-        </button>
+        {/* Bottom Bar: Page Navigation */}
+        <div className="h-16 bg-white border-t border-gray-200 flex items-center px-4 gap-3 overflow-x-auto z-20">
+          {pages.map((page, index) => (
+            <div key={page.id} className="relative group">
+              <button
+                onClick={() => setActivePage(page.id)}
+                className={`
+                  px-4 py-2 text-xs font-bold rounded-lg border flex flex-col items-center justify-center min-w-[80px] transition-all
+                  ${
+                    activePageId === page.id
+                      ? "bg-blue-50 border-blue-500 text-blue-700 shadow-sm ring-1 ring-blue-200"
+                      : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
+                  }
+                `}
+              >
+                <span>Halaman {index + 1}</span>
+              </button>
+
+              {/* Delete Page Button */}
+              {pages.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm(`Hapus halaman ${index + 1}?`)) {
+                      removePage(page.id);
+                    }
+                  }}
+                  className="absolute -top-1.5 -right-1.5 bg-red-500 hover:bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition shadow-sm z-30"
+                  title="Hapus Halaman"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ))}
+
+          <button
+            onClick={addPage}
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 shadow-md transition hover:scale-110"
+            title="Tambah Halaman Baru"
+          >
+            +
+          </button>
+        </div>
       </div>
 
-      {/* Style Helper untuk Button Tool */}
+      {/* --- TOOLS SIDEBAR (KANAN) --- */}
+      <div className="lg:col-span-3 flex flex-col bg-white shadow-xl z-30 border-l border-gray-200 h-full">
+        <div className="p-5 flex flex-col gap-5 h-full overflow-y-auto custom-scrollbar">
+          {/* Header */}
+          <div>
+            <h2 className="text-lg font-bold text-gray-800">Editor Sertifikat</h2>
+            <p className="text-xs text-gray-500">
+              Sesuaikan template sertifikat event.
+            </p>
+          </div>
+
+          {/* 1. Background Tool */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-bold text-[11px] text-gray-500 uppercase tracking-wider">
+                Background
+              </h3>
+              <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                Halaman Aktif
+              </span>
+            </div>
+
+            <input
+              type="file"
+              accept="image/*"
+              ref={fileInputRef}
+              onChange={handleUploadBackground}
+              className="hidden"
+            />
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:border-blue-400 hover:text-blue-600 transition text-xs font-bold shadow-sm flex items-center justify-center gap-2 group"
+            >
+              <span className="group-hover:scale-110 transition">🖼️</span>
+              {backgroundFiles[activePageId] ? "Ganti File" : "Upload Gambar"}
+            </button>
+            {backgroundFiles[activePageId] && (
+              <div className="mt-2 text-[10px] text-green-600 flex items-center gap-1">
+                ✓ File siap diupload:{" "}
+                <span className="truncate max-w-[150px] font-medium">
+                  {backgroundFiles[activePageId].name}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* 2. Elements Tool */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+            <h3 className="font-bold mb-3 text-[11px] text-gray-500 uppercase tracking-wider">
+              Tambah Elemen
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => addElement("name")} className="btn-tool">
+                🔤 Nama Peserta
+              </button>
+              <button onClick={() => addElement("nomor")} className="btn-tool">
+                🔢 No. Sertif
+              </button>
+              <button onClick={() => addElement("tanggal")} className="btn-tool">
+                📅 Tanggal
+              </button>
+              <button onClick={() => addElement("mentor")} className="btn-tool">
+                ✍️ Penanda Tangan
+              </button>
+              <button
+                onClick={() => addElement("text")}
+                className="btn-tool col-span-2 text-center justify-center"
+              >
+                📝 Teks Statis
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 my-1"></div>
+
+          {/* 3. Properties Form */}
+          <div className="flex-grow">
+            <ElementForm />
+          </div>
+
+          {/* Save Button */}
+          <div className="pt-4 mt-auto">
+            <button
+              onClick={saveTemplate}
+              disabled={isSaving}
+              className="bg-gray-900 text-white w-full py-3.5 rounded-xl hover:bg-black transition font-bold shadow-lg text-sm flex items-center justify-center gap-2 active:scale-95 transform duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSaving ? (
+                <>
+                  <span className="animate-spin">⏳</span> Menyimpan...
+                </>
+              ) : (
+                <>
+                  <span>💾</span> Simpan Perubahan
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <style jsx>{`
-        .btn-tool-modern {
-          @apply p-2.5 text-xs font-medium bg-white border border-gray-200 rounded-lg text-gray-600 shadow-sm transition-all hover:border-blue-300 hover:text-blue-600 hover:shadow-md text-left flex items-center gap-2;
+        .btn-tool {
+          @apply p-2.5 text-[11px] font-semibold bg-white border border-gray-200 rounded-lg text-gray-600 shadow-sm transition-all hover:border-blue-400 hover:text-blue-600 hover:shadow-md text-left flex items-center gap-1.5;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background-color: #cbd5e1;
+          border-radius: 4px;
         }
       `}</style>
     </div>
