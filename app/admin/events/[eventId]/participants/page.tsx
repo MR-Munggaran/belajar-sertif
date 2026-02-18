@@ -13,17 +13,32 @@ type ParticipantWithCert = Participant & {
   certificateId?: string | null;
 };
 
+type CertificatePage = {
+  id: string;
+  pageNumber: number;
+  backgroundImage: string | null;
+  paperSize?: "A4" | "Letter";
+  orientation?: "portrait" | "landscape";
+};
+
+type CertificateTemplate = {
+  id: string;
+  pages: CertificatePage[];
+};
+
 export default function ParticipantsPage() {
   const { eventId } = useParams<{ eventId: string }>();
-
-  console.log("eventId:", eventId);
-
 
   const [participants, setParticipants] = useState<ParticipantWithCert[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  
+  // NEW: Template & Page Selection
+  const [template, setTemplate] = useState<CertificateTemplate | null>(null);
+  const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+  const [showPageSelector, setShowPageSelector] = useState(false);
 
   const loadParticipants = async () => {
     try {
@@ -57,19 +72,20 @@ export default function ParticipantsPage() {
     }
   };
 
-  // Load participants on mount
+  // Load participants & template on mount
   useEffect(() => {
     let ignore = false;
 
-    async function fetchParticipants() {
+    async function fetchData() {
       try {
         if (!eventId) return;
+        
+        // Load participants
         const res = await fetch(`/api/participants?eventId=${eventId}`);
         if (!res.ok) return;
         const data = await res.json();
         
         if (!ignore) {
-          // Fetch certificates untuk setiap participant
           const participantsWithCerts = await Promise.all(
             data.map(async (p: Participant) => {
               try {
@@ -87,12 +103,27 @@ export default function ParticipantsPage() {
           
           setParticipants(participantsWithCerts);
         }
+
+        // Load template
+        const tmplRes = await fetch(`/api/certificate-templates?eventId=${eventId}`);
+        if (tmplRes.ok) {
+          const tmplData = await tmplRes.json();
+          if (tmplData && tmplData.length > 0 && !ignore) {
+            const tmpl = tmplData[0];
+            setTemplate(tmpl);
+            
+            // Default: select all pages
+            if (tmpl.pages && tmpl.pages.length > 0) {
+              setSelectedPageIds(tmpl.pages.map((p: CertificatePage) => p.id));
+            }
+          }
+        }
       } catch (error) {
         console.error("Fetch error:", error);
       }
     }
 
-    fetchParticipants();
+    fetchData();
 
     return () => {
       ignore = true;
@@ -183,19 +214,31 @@ export default function ParticipantsPage() {
     }
   };
 
-  // Generate certificates in bulk
-  const generateCertificates = async () => {
+  // Open page selector modal
+  const openPageSelector = () => {
+    if (!template || !template.pages || template.pages.length === 0) {
+      alert("Template belum memiliki halaman. Silakan buat template terlebih dahulu.");
+      return;
+    }
+
     if (selectedIds.length === 0) {
       alert("Pilih minimal 1 participant terlebih dahulu");
       return;
     }
 
-    if (!confirm(`Generate sertifikat untuk ${selectedIds.length} peserta?`)) {
+    setShowPageSelector(true);
+  };
+
+  // Generate certificates with selected pages
+  const generateCertificates = async () => {
+    if (selectedPageIds.length === 0) {
+      alert("Pilih minimal 1 halaman untuk di-generate");
       return;
     }
 
     try {
       setIsGenerating(true);
+      setShowPageSelector(false);
 
       const res = await fetch("/api/certificates/bulk", {
         method: "POST",
@@ -203,6 +246,7 @@ export default function ParticipantsPage() {
         body: JSON.stringify({
           eventId,
           participantIds: selectedIds,
+          pageIds: selectedPageIds, // Kirim page IDs yang dipilih
         }),
       });
 
@@ -215,7 +259,7 @@ export default function ParticipantsPage() {
 
       const data = await res.json();
       alert(
-        `✅ ${data.total} sertifikat berhasil dibuat!\n\nKlik tombol "View / Download" untuk melihat sertifikat.`
+        `✅ ${data.total} sertifikat berhasil dibuat dengan ${selectedPageIds.length} halaman!\n\nKlik tombol "View / Download" untuk melihat sertifikat.`
       );
 
       setSelectedIds([]); // Clear selection
@@ -225,6 +269,26 @@ export default function ParticipantsPage() {
       alert("Terjadi kesalahan saat generate sertifikat");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  // Toggle page selection
+  const togglePageSelection = (pageId: string) => {
+    setSelectedPageIds(prev =>
+      prev.includes(pageId)
+        ? prev.filter(id => id !== pageId)
+        : [...prev, pageId]
+    );
+  };
+
+  // Select all pages
+  const selectAllPages = () => {
+    if (!template) return;
+    
+    if (selectedPageIds.length === template.pages.length) {
+      setSelectedPageIds([]);
+    } else {
+      setSelectedPageIds(template.pages.map(p => p.id));
     }
   };
 
@@ -239,6 +303,117 @@ export default function ParticipantsPage() {
 
   return (
     <div className="max-w-6xl mx-auto p-6">
+      {/* Page Selector Modal */}
+      {showPageSelector && template && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
+              <h2 className="text-2xl font-bold mb-2">📄 Pilih Halaman Sertifikat</h2>
+              <p className="text-blue-100 text-sm">
+                Pilih halaman mana saja yang ingin di-generate untuk {selectedIds.length} peserta
+              </p>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="mb-4 flex items-center justify-between">
+                <button
+                  onClick={selectAllPages}
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  {selectedPageIds.length === template.pages.length
+                    ? "❌ Deselect All"
+                    : "✅ Select All Pages"}
+                </button>
+                <span className="text-sm text-gray-600">
+                  {selectedPageIds.length} dari {template.pages.length} halaman dipilih
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {template.pages.map((page) => (
+                  <label
+                    key={page.id}
+                    className={`relative border-2 rounded-xl p-4 cursor-pointer transition-all ${
+                      selectedPageIds.includes(page.id)
+                        ? "border-blue-500 bg-blue-50 shadow-md"
+                        : "border-gray-200 bg-white hover:border-blue-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedPageIds.includes(page.id)}
+                      onChange={() => togglePageSelection(page.id)}
+                      className="absolute top-3 right-3 w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    
+                    <div className="flex flex-col">
+                      <div className="text-lg font-bold text-gray-800 mb-2">
+                        Halaman {page.pageNumber}
+                      </div>
+                      
+                      {/* Page Preview (jika ada background) */}
+                      {page.backgroundImage ? (
+                        <div className="w-full h-32 bg-gray-100 rounded-lg mb-2 overflow-hidden">
+                          <img
+                            src={page.backgroundImage}
+                            alt={`Page ${page.pageNumber}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-full h-32 bg-gray-100 rounded-lg mb-2 flex items-center justify-center text-gray-400">
+                          <span className="text-4xl">📄</span>
+                        </div>
+                      )}
+                      
+                      <div className="text-xs text-gray-500 space-y-1">
+                        <div>📏 {page.paperSize || "A4"}</div>
+                        <div>🔄 {page.orientation || "landscape"}</div>
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              {selectedPageIds.length === 0 && (
+                <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <p className="text-sm text-yellow-800">
+                    ⚠️ Pilih minimal 1 halaman untuk melanjutkan
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 border-t border-gray-200 p-6 flex gap-3 justify-end">
+              <button
+                onClick={() => setShowPageSelector(false)}
+                className="px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition"
+              >
+                Batal
+              </button>
+              <button
+                onClick={generateCertificates}
+                disabled={selectedPageIds.length === 0 || isGenerating}
+                className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-bold transition flex items-center gap-2"
+              >
+                {isGenerating ? (
+                  <>
+                    <span className="animate-spin">⏳</span> Generating...
+                  </>
+                ) : (
+                  <>
+                    <span>🎓</span> Generate {selectedIds.length} Sertifikat
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -295,6 +470,21 @@ export default function ParticipantsPage() {
         />
       </div>
 
+      {/* Template Info */}
+      {template && template.pages && template.pages.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-bold text-blue-900">📑 Template Info</h3>
+              <p className="text-sm text-blue-700">
+                Template memiliki <strong>{template.pages.length} halaman</strong>. 
+                Anda dapat memilih halaman mana saja yang ingin di-generate.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bulk Actions */}
       <div className="bg-white rounded-xl shadow-md p-4 mb-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -312,19 +502,11 @@ export default function ParticipantsPage() {
         </div>
 
         <button
-          onClick={generateCertificates}
+          onClick={openPageSelector}
           disabled={selectedIds.length === 0 || isGenerating}
           className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-bold transition shadow-md flex items-center gap-2"
         >
-          {isGenerating ? (
-            <>
-              <span className="animate-spin">⏳</span> Generating...
-            </>
-          ) : (
-            <>
-              <span>🎓</span> Generate Certificates ({selectedIds.length})
-            </>
-          )}
+          <span>🎓</span> Generate Certificates ({selectedIds.length})
         </button>
       </div>
 

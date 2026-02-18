@@ -7,7 +7,23 @@ type Event = {
   id: string;
   title: string;
   description?: string | null;
-  date?: string | null;
+  date?: string | null; // ISO string dari API
+};
+
+// FIX: Helper format tanggal dari ISO timestamp ke YYYY-MM-DD untuk input
+const toInputDate = (isoString?: string | null): string => {
+  if (!isoString) return "";
+  return new Date(isoString).toISOString().split("T")[0];
+};
+
+// Helper format tampilan tanggal
+const formatDisplayDate = (isoString?: string | null): string => {
+  if (!isoString) return "";
+  return new Date(isoString).toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 };
 
 export default function EventsPage() {
@@ -24,7 +40,7 @@ export default function EventsPage() {
   };
 
   useEffect(() => {
-     const loadEvents = async () => {
+    const loadEvents = async () => {
       const r = await fetch("/api/events");
       const data = await r.json();
       setEvents(data);
@@ -40,6 +56,11 @@ export default function EventsPage() {
   };
 
   const createEvent = async () => {
+    if (!title.trim()) {
+      alert("Title wajib diisi");
+      return;
+    }
+
     await fetch("/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -82,7 +103,8 @@ export default function EventsPage() {
     setEditingId(e.id);
     setTitle(e.title);
     setDescription(e.description ?? "");
-    setDate(e.date ?? "");
+    // FIX: Convert ISO timestamp ke format YYYY-MM-DD untuk input date
+    setDate(toInputDate(e.date));
   };
 
   return (
@@ -92,9 +114,7 @@ export default function EventsPage() {
         <h1 className="text-3xl font-semibold text-slate-800">
           Event Management
         </h1>
-        <p className="text-slate-500 mt-1">
-          Create and manage your events
-        </p>
+        <p className="text-slate-500 mt-1">Create and manage your events</p>
       </div>
 
       {/* FORM */}
@@ -155,21 +175,27 @@ export default function EventsPage() {
 
       {/* LIST */}
       <div className="space-y-4">
+        {events.length === 0 && (
+          <div className="text-center py-12 text-slate-400">
+            <p className="text-5xl mb-3">📅</p>
+            <p>Belum ada event. Buat event pertama Anda!</p>
+          </div>
+        )}
+
         {events.map((e) => (
           <div
             key={e.id}
             className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4"
           >
             <div>
-              <p className="text-lg font-medium text-slate-800">
-                {e.title}
-              </p>
+              <p className="text-lg font-medium text-slate-800">{e.title}</p>
               <p className="text-sm text-slate-500">
                 {e.description || "No description"}
               </p>
               {e.date && (
                 <p className="text-xs text-slate-400 mt-1">
-                  📅 {e.date}
+                  {/* FIX: Format timestamp ke tampilan yang readable */}
+                  📅 {formatDisplayDate(e.date)}
                 </p>
               )}
             </div>

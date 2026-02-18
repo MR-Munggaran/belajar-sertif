@@ -10,7 +10,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const body = await req.json();
-  
+
   const [admin] = await db
     .select({ id: users.id })
     .from(users)
@@ -24,13 +24,16 @@ export async function POST(req: Request) {
     );
   }
 
+  // FIX: Convert string date ke Date object, atau null jika kosong
+  const dateValue = body.date ? new Date(body.date) : null;
+
   const [event] = await db
     .insert(events)
     .values({
       title: body.title,
       description: body.description ?? null,
-      date: body.date ?? null,
-      createdBy: admin.id, // ✅ UUID valid
+      date: dateValue,
+      createdBy: admin.id,
     })
     .returning();
 
@@ -40,15 +43,17 @@ export async function POST(req: Request) {
 export async function PUT(req: Request) {
   const { id, title, description, date } = await req.json();
 
+  // FIX: Convert string date ke Date object, atau null jika kosong
+  const dateValue = date ? new Date(date) : null;
+
   const [event] = await db
     .update(events)
-    .set({ title, description, date })
+    .set({ title, description, date: dateValue })
     .where(eq(events.id, id))
     .returning();
 
   return Response.json(event);
 }
-
 
 export async function DELETE(req: Request) {
   const { id } = await req.json();

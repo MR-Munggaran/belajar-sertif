@@ -35,8 +35,9 @@ export default function CertificateViewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CertificateData | null>(null);
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
 
-  const { loadTemplate } = useCertificateEditor();
+  const { loadTemplate, pages, setActivePage } = useCertificateEditor();
 
   useEffect(() => {
     async function loadData() {
@@ -70,7 +71,14 @@ export default function CertificateViewPage() {
     }
   }, [id, loadTemplate]);
 
-  // --- FUNGSI DOWNLOAD PNG (GAMBAR) ---
+  // Change active page when navigating
+  useEffect(() => {
+    if (pages && pages.length > 0 && pages[currentPageIndex]) {
+      setActivePage(pages[currentPageIndex].id);
+    }
+  }, [currentPageIndex, pages, setActivePage]);
+
+  // --- FUNGSI DOWNLOAD PNG (Current Page Only) ---
   const handleDownloadPNG = () => {
     const canvas = document.querySelector("canvas");
     if (!canvas) {
@@ -80,7 +88,8 @@ export default function CertificateViewPage() {
 
     try {
       const link = document.createElement("a");
-      link.download = `Sertifikat-${data?.participant.name || "file"}.png`;
+      const pageNum = currentPageIndex + 1;
+      link.download = `Sertifikat-${data?.participant.name || "file"}-Page${pageNum}.png`;
       link.href = canvas.toDataURL("image/png");
       link.click();
     } catch (error) {
@@ -89,37 +98,62 @@ export default function CertificateViewPage() {
     }
   };
 
-  // --- FUNGSI DOWNLOAD PDF ---
-  const handleDownloadPDF = () => {
-    const canvas = document.querySelector("canvas");
-    if (!canvas) {
-      alert("Canvas tidak ditemukan");
+  // --- FUNGSI DOWNLOAD PDF (Multi-Page Support) ---
+  const handleDownloadPDF = async () => {
+    if (!data || !pages || pages.length === 0) {
+      alert("Data tidak tersedia");
       return;
     }
 
     try {
-      // 1. Ambil gambar dari canvas dengan kualitas maksimal
-      const imgData = canvas.toDataURL("image/png", 1.0);
+      // Create jsPDF instance
+      let pdf: jsPDF | null = null;
 
-      // 2. Setup ukuran PDF sesuai ukuran Canvas
-      const orientation = canvas.width > canvas.height ? "l" : "p";
+      // Loop through each page
+      for (let i = 0; i < pages.length; i++) {
+        // Change to the page
+        setCurrentPageIndex(i);
+        setActivePage(pages[i].id);
 
-      // Konversi pixel ke mm (96 DPI standard)
-      const widthMm = (canvas.width * 25.4) / 96;
-      const heightMm = (canvas.height * 25.4) / 96;
+        // Wait for canvas to render
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
-      const pdf = new jsPDF({
-        orientation: orientation,
-        unit: "mm",
-        format: [widthMm, heightMm],
-        compress: true,
-      });
+        const canvas = document.querySelector("canvas");
+        if (!canvas) continue;
 
-      // 3. Masukkan gambar ke PDF (full size)
-      pdf.addImage(imgData, "PNG", 0, 0, widthMm, heightMm, undefined, "FAST");
+        // Get canvas image
+        const imgData = canvas.toDataURL("image/png", 1.0);
 
-      // 4. Save
-      pdf.save(`Sertifikat-${data?.participant.name || "file"}.pdf`);
+        // Setup PDF dimensions
+        const orientation = canvas.width > canvas.height ? "l" : "p";
+        const widthMm = (canvas.width * 25.4) / 96;
+        const heightMm = (canvas.height * 25.4) / 96;
+
+        if (i === 0) {
+          // Create PDF on first page
+          pdf = new jsPDF({
+            orientation: orientation,
+            unit: "mm",
+            format: [widthMm, heightMm],
+            compress: true,
+          });
+        } else {
+          // Add new page for subsequent pages
+          pdf!.addPage([widthMm, heightMm], orientation);
+        }
+
+        // Add image to current page
+        pdf!.addImage(imgData, "PNG", 0, 0, widthMm, heightMm, undefined, "FAST");
+      }
+
+      // Save PDF
+      if (pdf) {
+        pdf.save(`Sertifikat-${data.participant.name}.pdf`);
+        alert(`✅ PDF berhasil di-download dengan ${pages.length} halaman!`);
+      }
+
+      // Reset to first page
+      setCurrentPageIndex(0);
     } catch (error) {
       console.error("Download PDF error:", error);
       alert("Gagal download PDF");
@@ -184,6 +218,8 @@ export default function CertificateViewPage() {
     year: "numeric",
   });
 
+  const totalPages = pages?.length || 1;
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-linear-to-br from-gray-50 to-gray-100 p-4">
       {/* Header Card */}
@@ -199,6 +235,11 @@ export default function CertificateViewPage() {
           <p className="text-sm text-gray-500">
             {certificateNumber} • {certificateDate}
           </p>
+          {totalPages > 1 && (
+            <p className="text-xs text-blue-600 mt-2">
+              📄 Sertifikat ini memiliki {totalPages} halaman
+            </p>
+          )}
         </div>
 
         {/* Download Buttons */}
@@ -208,7 +249,7 @@ export default function CertificateViewPage() {
             className="bg-gray-700 hover:bg-gray-800 text-white font-medium px-6 py-3 rounded-lg shadow-lg transition-all transform hover:scale-105 flex items-center gap-2"
           >
             <span>🖼️</span>
-            Download PNG
+            Download PNG (Halaman {currentPageIndex + 1})
           </button>
 
           <button
@@ -216,7 +257,7 @@ export default function CertificateViewPage() {
             className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-3 rounded-lg shadow-lg transition-all transform hover:scale-105 flex items-center gap-2"
           >
             <span>📄</span>
-            Download PDF
+            Download PDF {totalPages > 1 && `(${totalPages} hal)`}
           </button>
         </div>
       </div>
@@ -234,9 +275,34 @@ export default function CertificateViewPage() {
         />
       </div>
 
+      {/* Page Navigation */}
+      {totalPages > 1 && (
+        <div className="mt-6 flex items-center gap-4 bg-white px-6 py-3 rounded-xl shadow-md">
+          <button
+            onClick={() => setCurrentPageIndex(Math.max(0, currentPageIndex - 1))}
+            disabled={currentPageIndex === 0}
+            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed rounded-lg font-medium transition"
+          >
+            ← Previous
+          </button>
+          
+          <span className="text-sm font-medium text-gray-700">
+            Halaman {currentPageIndex + 1} dari {totalPages}
+          </span>
+          
+          <button
+            onClick={() => setCurrentPageIndex(Math.min(totalPages - 1, currentPageIndex + 1))}
+            disabled={currentPageIndex === totalPages - 1}
+            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed rounded-lg font-medium transition"
+          >
+            Next →
+          </button>
+        </div>
+      )}
+
       {/* Footer Info */}
       <div className="mt-6 text-center text-sm text-gray-500">
-        <p>💡 Tip: Klik tombol &quot;Download PDF&quot; untuk mendapatkan sertifikat dalam format PDF</p>
+        <p>💡 Tip: Download PDF akan menyimpan semua halaman dalam 1 file</p>
         <p className="text-xs mt-2">Certificate ID: {id}</p>
       </div>
     </div>
